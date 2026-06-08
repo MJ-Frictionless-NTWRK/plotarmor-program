@@ -20,4 +20,6 @@ pub enum PlotArmorError {
     ThresholdNotMet,
     #[msg("Program is paused")]
     Paused,
+    #[msg("Signer is not the work claim claimant")]
+    Unauthorized,
 }
