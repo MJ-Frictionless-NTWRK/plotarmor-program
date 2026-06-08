@@ -18,4 +18,6 @@ pub enum PlotArmorError {
     ReservedFieldNonZero,
     #[msg("Threshold not met")]
     ThresholdNotMet,
+    #[msg("Program is paused")]
+    Paused,
 }
