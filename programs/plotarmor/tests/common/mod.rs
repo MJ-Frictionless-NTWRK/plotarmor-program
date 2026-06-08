@@ -26,7 +26,7 @@ pub fn setup() -> TestContext {
     let mut svm = LiteSVM::new();
 
     let program_bytes =
-        include_bytes!("../../../target/deploy/plotarmor.so");
+        include_bytes!("../../../../target/deploy/plotarmor.so");
 
     svm.add_program(plotarmor::ID, program_bytes).unwrap();
     svm.airdrop(&payer.pubkey(), TEST_KEYPAIR_LAMPORTS).unwrap();
