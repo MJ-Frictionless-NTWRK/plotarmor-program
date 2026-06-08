@@ -9,6 +9,15 @@ use anchor_lang::prelude::*;
 
 pub use constants::*;
 #[allow(unused_imports)]
+use instructions::add_owner::__client_accounts_add_owner;
+pub use instructions::AddOwner;
+#[allow(unused_imports)]
+use instructions::anchor_authorized_contract::__client_accounts_anchor_authorized_contract;
+pub use instructions::AnchorAuthorizedContract;
+#[allow(unused_imports)]
+use instructions::anchor_evidence_contract::__client_accounts_anchor_evidence_contract;
+pub use instructions::AnchorEvidenceContract;
+#[allow(unused_imports)]
 use instructions::add_version::__client_accounts_add_version;
 pub use instructions::AddVersion;
 #[allow(unused_imports)]
@@ -27,6 +36,49 @@ pub mod plotarmor {
 
     pub fn init_registry_config(ctx: Context<InitRegistryConfig>) -> Result<()> {
         instructions::init_registry_config::handler(ctx)
+    }
+
+    pub fn add_owner(
+        ctx: Context<AddOwner>,
+        new_share: u16,
+        new_role: u8,
+        new_threshold_shares: u16,
+    ) -> Result<()> {
+        instructions::add_owner::handler(ctx, new_share, new_role, new_threshold_shares)
+    }
+
+    pub fn anchor_authorized_contract(
+        ctx: Context<AnchorAuthorizedContract>,
+        raw_contract_hash: [u8; 32],
+        contract_kind: u8,
+        anchor_nonce: [u8; 32],
+        anchor_mode_arg: u8,
+    ) -> Result<()> {
+        instructions::anchor_authorized_contract::handler(
+            ctx,
+            raw_contract_hash,
+            contract_kind,
+            anchor_nonce,
+            anchor_mode_arg,
+        )
+    }
+
+    pub fn anchor_evidence_contract(
+        ctx: Context<AnchorEvidenceContract>,
+        raw_contract_hash: [u8; 32],
+        contract_kind: u8,
+        anchor_nonce: [u8; 32],
+        anchor_mode_arg: u8,
+        asserted_work_claim: Pubkey,
+    ) -> Result<()> {
+        instructions::anchor_evidence_contract::handler(
+            ctx,
+            raw_contract_hash,
+            contract_kind,
+            anchor_nonce,
+            anchor_mode_arg,
+            asserted_work_claim,
+        )
     }
 
     pub fn add_version(
