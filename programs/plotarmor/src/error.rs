@@ -22,4 +22,6 @@ pub enum PlotArmorError {
     Paused,
     #[msg("Signer is not the work claim claimant")]
     Unauthorized,
+    #[msg("Work claim has been superseded")]
+    SupersededClaim,
 }

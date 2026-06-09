@@ -82,6 +82,12 @@ pub fn handler(
         PlotArmorError::Unauthorized
     );
 
+    // Superseded claim chains are frozen — invariant C.4.
+    require!(
+        ctx.accounts.work_claim.superseded_by == Pubkey::default(),
+        PlotArmorError::SupersededClaim
+    );
+
     // 4. Anti-fork check: client must hold the current lineage head.
     //    Validates against latest_link, NOT latest_artifact, to prevent a silent fork
     //    if a version-add transaction reverts after the link account was created.
