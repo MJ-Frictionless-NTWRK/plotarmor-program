@@ -49,3 +49,65 @@ impl AnchoredObjectKind {
         }
     }
 }
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimKind {
+    Unspecified = 0,
+    Original    = 1,
+    Adapted     = 2,
+    WorkForHire = 3,
+    Derivative  = 4,
+    Assignment  = 5,
+}
+
+impl ClaimKind {
+    pub fn from_u8(value: u8) -> Result<Self, &'static str> {
+        match value {
+            0 => Ok(ClaimKind::Unspecified),
+            1 => Ok(ClaimKind::Original),
+            2 => Ok(ClaimKind::Adapted),
+            3 => Ok(ClaimKind::WorkForHire),
+            4 => Ok(ClaimKind::Derivative),
+            5 => Ok(ClaimKind::Assignment),
+            _ => Err("Invalid ClaimKind value"),
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractKind {
+    Unspecified     = 0,
+    Nda             = 1,
+    WriterAgreement = 2,
+    Collaboration   = 3,
+    Option          = 4,
+    OptionExtension = 5,
+    OptionExercise  = 6,
+    Purchase        = 7,
+    Amendment       = 8,
+    Assignment      = 9,
+    License         = 10,
+    Other           = 11,
+}
+
+impl ContractKind {
+    pub fn from_u8(value: u8) -> Result<Self, &'static str> {
+        match value {
+            0  => Ok(ContractKind::Unspecified),
+            1  => Ok(ContractKind::Nda),
+            2  => Ok(ContractKind::WriterAgreement),
+            3  => Ok(ContractKind::Collaboration),
+            4  => Ok(ContractKind::Option),
+            5  => Ok(ContractKind::OptionExtension),
+            6  => Ok(ContractKind::OptionExercise),
+            7  => Ok(ContractKind::Purchase),
+            8  => Ok(ContractKind::Amendment),
+            9  => Ok(ContractKind::Assignment),
+            10 => Ok(ContractKind::License),
+            11 => Ok(ContractKind::Other),
+            _  => Err("Invalid ContractKind value"),
+        }
+    }
+}

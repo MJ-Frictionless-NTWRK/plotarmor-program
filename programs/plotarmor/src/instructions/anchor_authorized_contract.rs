@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::error::PlotArmorError;
 use crate::helpers::assert_mode_allowed;
-use crate::modes::AnchoredObjectKind;
+use crate::modes::{AnchoredObjectKind, ContractKind};
 use crate::state::{
     AnchorRecord, AuthorizedContractAnchor, ContractArtifact, Ownership, RegistryConfig, WorkClaim,
 };
@@ -84,6 +84,10 @@ pub fn handler(
         ctx.accounts.admin.key() == ctx.accounts.ownership.admin,
         PlotArmorError::Unauthorized
     );
+
+    // Validate contract_kind is a known value.
+    ContractKind::from_u8(contract_kind)
+        .map_err(|_| error!(PlotArmorError::AnchorModeNotAllowed))?;
 
     let now = Clock::get()?.unix_timestamp;
 
