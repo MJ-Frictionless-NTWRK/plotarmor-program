@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::error::PlotArmorError;
 use crate::helpers::assert_mode_allowed;
+use crate::modes::AnchoredObjectKind;
 use crate::state::{
     AnchorRecord, ClaimArtifactLink, ContentArtifact, Ownership, OwnerRecord, RegistryConfig,
     WorkClaim,
@@ -160,7 +161,7 @@ pub fn handler(
 
     // 9. AnchorRecord for the WorkClaim registration event only.
     ctx.accounts.anchor_record.anchored_object = work_claim_key;
-    ctx.accounts.anchor_record.anchored_object_kind = 0; // WorkClaim
+    ctx.accounts.anchor_record.anchored_object_kind = AnchoredObjectKind::WorkClaim as u8;
     ctx.accounts.anchor_record.anchor_mode = anchor_mode_arg;
     ctx.accounts.anchor_record.created_at = now;
     ctx.accounts.anchor_record.external_ref_hash = [0u8; 32];

@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::error::PlotArmorError;
 use crate::helpers::assert_mode_allowed;
+use crate::modes::AnchoredObjectKind;
 use crate::state::{AnchorRecord, ContractArtifact, EvidenceAnchor, RegistryConfig};
 
 #[derive(Accounts)]
@@ -90,7 +91,7 @@ pub fn handler(
 
     // 5. AnchorRecord for this evidence-anchor event.
     ctx.accounts.anchor_record.anchored_object = evidence_anchor_key;
-    ctx.accounts.anchor_record.anchored_object_kind = 2; // EvidenceAnchor
+    ctx.accounts.anchor_record.anchored_object_kind = AnchoredObjectKind::EvidenceAnchor as u8;
     ctx.accounts.anchor_record.anchor_mode = anchor_mode_arg;
     ctx.accounts.anchor_record.created_at = now;
     ctx.accounts.anchor_record.external_ref_hash = [0u8; 32];

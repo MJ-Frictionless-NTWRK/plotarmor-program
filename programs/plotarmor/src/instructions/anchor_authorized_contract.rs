@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::error::PlotArmorError;
 use crate::helpers::assert_mode_allowed;
+use crate::modes::AnchoredObjectKind;
 use crate::state::{
     AnchorRecord, AuthorizedContractAnchor, ContractArtifact, Ownership, RegistryConfig, WorkClaim,
 };
@@ -109,7 +110,8 @@ pub fn handler(
 
     // 6. AnchorRecord for this authorized-anchor event.
     ctx.accounts.anchor_record.anchored_object = authorized_contract_anchor_key;
-    ctx.accounts.anchor_record.anchored_object_kind = 3; // AuthorizedContractAnchor
+    ctx.accounts.anchor_record.anchored_object_kind =
+        AnchoredObjectKind::AuthorizedContractAnchor as u8;
     ctx.accounts.anchor_record.anchor_mode = anchor_mode_arg;
     ctx.accounts.anchor_record.created_at = now;
     ctx.accounts.anchor_record.external_ref_hash = [0u8; 32];
