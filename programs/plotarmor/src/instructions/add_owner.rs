@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::error::PlotArmorError;
+use crate::modes::OwnerRole;
 use crate::state::{Ownership, OwnerRecord, RegistryConfig, WorkClaim};
 
 #[derive(Accounts)]
@@ -53,6 +54,10 @@ pub fn handler(
 
     // 2. new_share must be positive; zero-share owners are not meaningful records.
     require!(new_share > 0, PlotArmorError::ShareSumMismatch);
+
+    // Validate new_role is a known value.
+    OwnerRole::from_u8(new_role)
+        .map_err(|_| error!(PlotArmorError::AnchorModeNotAllowed))?;
 
     // 3. Checked add to satisfy invariant C.5: sum(OwnerRecord.share) == total_shares.
     let new_total = ctx

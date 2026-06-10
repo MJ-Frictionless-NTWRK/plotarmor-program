@@ -111,3 +111,57 @@ impl ContractKind {
         }
     }
 }
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentKind {
+    Unspecified = 0,
+    Screenplay  = 1,
+    Treatment   = 2,
+    Outline     = 3,
+    Contract    = 4,
+    Score       = 5,
+    Master      = 6,
+    Foley       = 7,
+}
+
+impl ContentKind {
+    pub fn from_u8(value: u8) -> Result<Self, &'static str> {
+        match value {
+            0 => Ok(ContentKind::Unspecified),
+            1 => Ok(ContentKind::Screenplay),
+            2 => Ok(ContentKind::Treatment),
+            3 => Ok(ContentKind::Outline),
+            4 => Ok(ContentKind::Contract),
+            5 => Ok(ContentKind::Score),
+            6 => Ok(ContentKind::Master),
+            7 => Ok(ContentKind::Foley),
+            _ => Err("Invalid ContentKind value"),
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerRole {
+    Unspecified = 0,
+    Author      = 1,
+    CoAuthor    = 2,
+    Producer    = 3,
+    Financier   = 4,
+    Assignee    = 5,
+}
+
+impl OwnerRole {
+    pub fn from_u8(value: u8) -> Result<Self, &'static str> {
+        match value {
+            0 => Ok(OwnerRole::Unspecified),
+            1 => Ok(OwnerRole::Author),
+            2 => Ok(OwnerRole::CoAuthor),
+            3 => Ok(OwnerRole::Producer),
+            4 => Ok(OwnerRole::Financier),
+            5 => Ok(OwnerRole::Assignee),
+            _ => Err("Invalid OwnerRole value"),
+        }
+    }
+}

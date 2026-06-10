@@ -801,7 +801,7 @@ fn is_initialized_guard_blocks_overwrite() {
         &second_claimant,
         registry_config,
         [70; 32],
-        99,
+        2,
         [73; 32],
         [74; 32],
     );

@@ -4,9 +4,10 @@ use {
     anchor_lang::{
         prelude::Pubkey,
         solana_program::{instruction::Instruction, system_program},
-        InstructionData, ToAccountMetas,
+        AccountSerialize, InstructionData, ToAccountMetas,
     },
-    common::{send_instruction, setup, ANCHOR_MODE},
+    common::{read_account, send_instruction, setup, ANCHOR_MODE},
+    plotarmor::{AnchorRecord, WorkClaim},
     solana_keypair::Keypair,
     solana_signer::Signer,
 };
@@ -165,6 +166,134 @@ fn assert_anchor_error(error: &litesvm::types::FailedTransactionMetadata, name: 
         "expected custom error {code}, got {:?}",
         error.err
     );
+}
+
+// Variant of build_register_claim that exposes content_kind, claim_kind, and the
+// share parameters so individual validation paths can be exercised directly.
+fn build_register_claim_custom(
+    claimant: &Keypair,
+    registry_config: Pubkey,
+    raw_hash: [u8; 32],
+    link_nonce: [u8; 32],
+    anchor_nonce: [u8; 32],
+    content_kind: u8,
+    claim_kind: u8,
+    total_shares: u16,
+    threshold_shares: u16,
+) -> (Instruction, ClaimFixture) {
+    let content_artifact =
+        Pubkey::find_program_address(&[b"content", raw_hash.as_ref()], &plotarmor::ID).0;
+    let work_claim = Pubkey::find_program_address(
+        &[
+            b"claim",
+            content_artifact.as_ref(),
+            claimant.pubkey().as_ref(),
+        ],
+        &plotarmor::ID,
+    )
+    .0;
+    let ownership =
+        Pubkey::find_program_address(&[b"ownership", work_claim.as_ref()], &plotarmor::ID).0;
+    let owner_record = Pubkey::find_program_address(
+        &[b"owner", ownership.as_ref(), claimant.pubkey().as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let claim_artifact_link = Pubkey::find_program_address(
+        &[b"claim_artifact", work_claim.as_ref(), link_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let anchor_record = Pubkey::find_program_address(
+        &[b"anchor", work_claim.as_ref(), anchor_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::RegisterWorkClaim {
+            raw_hash,
+            content_kind,
+            claim_kind,
+            total_shares,
+            threshold_shares,
+            link_nonce,
+            anchor_nonce,
+            anchor_mode_arg: ANCHOR_MODE,
+        }
+        .data(),
+        plotarmor::accounts::RegisterWorkClaim {
+            registry_config,
+            content_artifact,
+            work_claim,
+            ownership,
+            owner_record,
+            claim_artifact_link,
+            anchor_record,
+            signer: claimant.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+
+    (
+        instruction,
+        ClaimFixture {
+            work_claim,
+            ownership,
+            claim_artifact_link,
+        },
+    )
+}
+
+// Mirrors the build_add_version helper in happy_paths: derives the version
+// accounts and returns the AddVersion instruction ready to send.
+fn build_add_version(
+    signer: &Keypair,
+    registry_config: Pubkey,
+    work_claim: Pubkey,
+    raw_hash: [u8; 32],
+    content_kind: u8,
+    link_nonce: [u8; 32],
+    anchor_nonce: [u8; 32],
+    expected_previous_link: Pubkey,
+) -> Instruction {
+    let content_artifact =
+        Pubkey::find_program_address(&[b"content", raw_hash.as_ref()], &plotarmor::ID).0;
+    let claim_artifact_link = Pubkey::find_program_address(
+        &[b"claim_artifact", work_claim.as_ref(), link_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let anchor_record = Pubkey::find_program_address(
+        &[b"anchor", content_artifact.as_ref(), anchor_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+
+    Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::AddVersion {
+            raw_hash,
+            content_kind,
+            link_nonce,
+            anchor_nonce,
+            anchor_mode_arg: ANCHOR_MODE,
+            expected_previous_link,
+        }
+        .data(),
+        plotarmor::accounts::AddVersion {
+            registry_config,
+            work_claim,
+            content_artifact,
+            claim_artifact_link,
+            anchor_record,
+            signer: signer.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    )
 }
 
 #[test]
@@ -456,6 +585,406 @@ fn unknown_anchor_mode_rejected() {
         [103; 32],
         [104; 32],
         99,
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "AnchorModeNotAllowed", 6002);
+}
+
+#[test]
+fn superseded_claim_freezes_add_version() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+    let fixture = register_claim(
+        &mut context.svm,
+        &context.authority,
+        registry_config,
+        [110; 32],
+        [111; 32],
+        [112; 32],
+    );
+
+    // Directly stamp superseded_by on the WorkClaim, simulating a freeze applied
+    // by a later supersession event.
+    let mut work_claim: WorkClaim = read_account(&context.svm, &fixture.work_claim);
+    work_claim.superseded_by = Pubkey::new_unique();
+
+    let mut work_claim_account = context.svm.get_account(&fixture.work_claim).unwrap();
+    work_claim
+        .try_serialize(&mut work_claim_account.data.as_mut_slice())
+        .unwrap();
+    context
+        .svm
+        .set_account(fixture.work_claim, work_claim_account)
+        .unwrap();
+
+    // Correct expected_previous_link, so the only thing that can reject is the
+    // superseded freeze.
+    let instruction = build_add_version(
+        &context.authority,
+        registry_config,
+        fixture.work_claim,
+        [113; 32],
+        2,
+        [114; 32],
+        [115; 32],
+        fixture.claim_artifact_link,
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "SupersededClaim", 6010);
+}
+
+#[test]
+fn invalid_claim_kind_rejected() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let (instruction, _) = build_register_claim_custom(
+        &context.authority,
+        registry_config,
+        [116; 32],
+        [117; 32],
+        [118; 32],
+        1,
+        99,
+        100,
+        100,
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "AnchorModeNotAllowed", 6002);
+}
+
+#[test]
+fn invalid_contract_kind_rejected() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let raw_contract_hash = [119; 32];
+    let anchor_nonce = [120; 32];
+
+    let contract_artifact = Pubkey::find_program_address(
+        &[b"contract_artifact", raw_contract_hash.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let evidence_anchor = Pubkey::find_program_address(
+        &[
+            b"evidence",
+            context.authority.pubkey().as_ref(),
+            contract_artifact.as_ref(),
+        ],
+        &plotarmor::ID,
+    )
+    .0;
+    let anchor_record = Pubkey::find_program_address(
+        &[b"anchor", evidence_anchor.as_ref(), anchor_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::AnchorEvidenceContract {
+            raw_contract_hash,
+            contract_kind: 99,
+            anchor_nonce,
+            anchor_mode_arg: ANCHOR_MODE,
+            asserted_work_claim: Pubkey::default(),
+        }
+        .data(),
+        plotarmor::accounts::AnchorEvidenceContract {
+            registry_config,
+            contract_artifact,
+            evidence_anchor,
+            anchor_record,
+            anchorer: context.authority.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "AnchorModeNotAllowed", 6002);
+}
+
+#[test]
+fn threshold_above_total_rejected() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let (instruction, _) = build_register_claim_custom(
+        &context.authority,
+        registry_config,
+        [121; 32],
+        [122; 32],
+        [123; 32],
+        1,
+        1,
+        100,
+        101,
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "ShareSumMismatch", 6005);
+}
+
+#[test]
+fn zero_share_add_owner_rejected() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+    let fixture = register_claim(
+        &mut context.svm,
+        &context.authority,
+        registry_config,
+        [124; 32],
+        [125; 32],
+        [126; 32],
+    );
+
+    let new_owner = Keypair::new();
+    context
+        .svm
+        .airdrop(&new_owner.pubkey(), TEST_KEYPAIR_LAMPORTS)
+        .unwrap();
+
+    let new_owner_record = Pubkey::find_program_address(
+        &[
+            b"owner",
+            fixture.ownership.as_ref(),
+            new_owner.pubkey().as_ref(),
+        ],
+        &plotarmor::ID,
+    )
+    .0;
+
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::AddOwner {
+            new_share: 0,
+            new_role: 1,
+            new_threshold_shares: 100,
+        }
+        .data(),
+        plotarmor::accounts::AddOwner {
+            registry_config,
+            work_claim: fixture.work_claim,
+            ownership: fixture.ownership,
+            new_owner_record,
+            admin: context.authority.pubkey(),
+            new_owner: new_owner.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "ShareSumMismatch", 6005);
+}
+
+#[test]
+fn share_overflow_rejected() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let (register_instruction, fixture) = build_register_claim_custom(
+        &context.authority,
+        registry_config,
+        [127; 32],
+        [128; 32],
+        [129; 32],
+        1,
+        1,
+        u16::MAX,
+        u16::MAX,
+    );
+    send_instruction(&mut context.svm, register_instruction, &context.authority);
+
+    let new_owner = Keypair::new();
+    context
+        .svm
+        .airdrop(&new_owner.pubkey(), TEST_KEYPAIR_LAMPORTS)
+        .unwrap();
+
+    let new_owner_record = Pubkey::find_program_address(
+        &[
+            b"owner",
+            fixture.ownership.as_ref(),
+            new_owner.pubkey().as_ref(),
+        ],
+        &plotarmor::ID,
+    )
+    .0;
+
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::AddOwner {
+            new_share: 1,
+            new_role: 1,
+            new_threshold_shares: 1,
+        }
+        .data(),
+        plotarmor::accounts::AddOwner {
+            registry_config,
+            work_claim: fixture.work_claim,
+            ownership: fixture.ownership,
+            new_owner_record,
+            admin: context.authority.pubkey(),
+            new_owner: new_owner.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "ShareOverflow", 6004);
+}
+
+#[test]
+fn anchor_record_fields_locked() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let anchor_nonce = [132; 32];
+    let fixture = register_claim(
+        &mut context.svm,
+        &context.authority,
+        registry_config,
+        [130; 32],
+        [131; 32],
+        anchor_nonce,
+    );
+
+    // Registration anchors the WorkClaim itself: seed is the work_claim PDA.
+    let anchor_record_pda = Pubkey::find_program_address(
+        &[b"anchor", fixture.work_claim.as_ref(), anchor_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+
+    let anchor_record: AnchorRecord = read_account(&context.svm, &anchor_record_pda);
+
+    assert_eq!(anchor_record.anchored_object, fixture.work_claim);
+    assert_eq!(anchor_record.anchored_object_kind, 0);
+    assert_eq!(anchor_record.anchor_mode, ANCHOR_MODE);
+    assert_eq!(anchor_record.external_ref_hash, [0u8; 32]);
+}
+
+#[test]
+fn invalid_content_kind_rejected() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let (instruction, _) = build_register_claim_custom(
+        &context.authority,
+        registry_config,
+        [140; 32],
+        [141; 32],
+        [142; 32],
+        99,
+        1,
+        100,
+        100,
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "AnchorModeNotAllowed", 6002);
+}
+
+#[test]
+fn invalid_content_kind_rejected_on_add_version() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+    let fixture = register_claim(
+        &mut context.svm,
+        &context.authority,
+        registry_config,
+        [143; 32],
+        [144; 32],
+        [145; 32],
+    );
+
+    let instruction = build_add_version(
+        &context.authority,
+        registry_config,
+        fixture.work_claim,
+        [146; 32],
+        99,
+        [147; 32],
+        [148; 32],
+        fixture.claim_artifact_link,
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "AnchorModeNotAllowed", 6002);
+}
+
+#[test]
+fn invalid_role_rejected() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+    let fixture = register_claim(
+        &mut context.svm,
+        &context.authority,
+        registry_config,
+        [149; 32],
+        [150; 32],
+        [151; 32],
+    );
+
+    let new_owner = solana_keypair::Keypair::new();
+    context
+        .svm
+        .airdrop(&new_owner.pubkey(), TEST_KEYPAIR_LAMPORTS)
+        .unwrap();
+
+    let new_owner_record = Pubkey::find_program_address(
+        &[
+            b"owner",
+            fixture.ownership.as_ref(),
+            new_owner.pubkey().as_ref(),
+        ],
+        &plotarmor::ID,
+    )
+    .0;
+
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::AddOwner {
+            new_share: 50,
+            new_role: 99,
+            new_threshold_shares: 100,
+        }
+        .data(),
+        plotarmor::accounts::AddOwner {
+            registry_config,
+            work_claim: fixture.work_claim,
+            ownership: fixture.ownership,
+            new_owner_record,
+            admin: context.authority.pubkey(),
+            new_owner: new_owner.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
     );
 
     let error =

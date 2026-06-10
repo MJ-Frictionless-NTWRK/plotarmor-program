@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::error::PlotArmorError;
 use crate::helpers::assert_mode_allowed;
-use crate::modes::AnchoredObjectKind;
+use crate::modes::{AnchoredObjectKind, ContentKind};
 use crate::state::{AnchorRecord, ClaimArtifactLink, ContentArtifact, RegistryConfig, WorkClaim};
 
 #[derive(Accounts)]
@@ -87,6 +87,10 @@ pub fn handler(
         ctx.accounts.work_claim.superseded_by == Pubkey::default(),
         PlotArmorError::SupersededClaim
     );
+
+    // Validate content_kind is a known value.
+    ContentKind::from_u8(content_kind)
+        .map_err(|_| error!(PlotArmorError::AnchorModeNotAllowed))?;
 
     // 4. Anti-fork check: client must hold the current lineage head.
     //    Validates against latest_link, NOT latest_artifact, to prevent a silent fork

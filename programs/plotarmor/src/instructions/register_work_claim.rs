@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::error::PlotArmorError;
 use crate::helpers::assert_mode_allowed;
-use crate::modes::{AnchoredObjectKind, ClaimKind};
+use crate::modes::{AnchoredObjectKind, ClaimKind, ContentKind};
 use crate::state::{
     AnchorRecord, ClaimArtifactLink, ContentArtifact, Ownership, OwnerRecord, RegistryConfig,
     WorkClaim,
@@ -111,6 +111,10 @@ pub fn handler(
 
     // Validate claim_kind is a known value.
     ClaimKind::from_u8(claim_kind)
+        .map_err(|_| error!(PlotArmorError::AnchorModeNotAllowed))?;
+
+    // Validate content_kind is a known value.
+    ContentKind::from_u8(content_kind)
         .map_err(|_| error!(PlotArmorError::AnchorModeNotAllowed))?;
 
     let now = Clock::get()?.unix_timestamp;
