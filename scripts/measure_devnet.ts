@@ -6,6 +6,7 @@ import {
   SystemProgram,
   clusterApiUrl,
 } from "@solana/web3.js";
+import { randomBytes } from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -30,8 +31,8 @@ type MeasuredAccount = {
   pubkey: PublicKey;
 };
 
-function bytes(value: number): number[] {
-  return Array(32).fill(value);
+function randomHash(): number[] {
+  return Array.from(randomBytes(32));
 }
 
 function derive(seeds: Buffer[]): PublicKey {
@@ -129,7 +130,8 @@ async function recordMeasurements(
 }
 
 async function main(): Promise<void> {
-  const connection = new Connection(clusterApiUrl("devnet"), COMMITMENT);
+  const rpcUrl = process.env.SOLANA_RPC_URL ?? clusterApiUrl("devnet");
+  const connection = new Connection(rpcUrl, COMMITMENT);
   const payer = loadPayer();
   const wallet = new anchor.Wallet(payer);
   const provider = new anchor.AnchorProvider(connection, wallet, {
@@ -165,9 +167,9 @@ async function main(): Promise<void> {
 
   const registryConfig = derive([Buffer.from("config")]);
 
-  const rawHash1 = bytes(0x01);
-  const linkNonce1 = bytes(0x02);
-  const anchorNonce1 = bytes(0x03);
+  const rawHash1 = randomHash();
+  const linkNonce1 = randomHash();
+  const anchorNonce1 = randomHash();
 
   const contentArtifact1 = derive([
     Buffer.from("content"),
@@ -198,22 +200,34 @@ async function main(): Promise<void> {
     Buffer.from(anchorNonce1),
   ]);
 
-  const initSignature = await program.methods
-    .initRegistryConfig()
-    .accountsStrict({
-      registryConfig,
-      signer: payer.publicKey,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
+  try {
+    const initSignature = await program.methods
+      .initRegistryConfig()
+      .accountsStrict({
+        registryConfig,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
 
-  await recordMeasurements(
-    connection,
-    "init_registry_config",
-    initSignature,
-    [{ name: "RegistryConfig", pubkey: registryConfig }],
-    measurements,
-  );
+    await recordMeasurements(
+      connection,
+      "init_registry_config",
+      initSignature,
+      [{ name: "RegistryConfig", pubkey: registryConfig }],
+      measurements,
+    );
+  } catch (err: unknown) {
+    const info = await connection.getAccountInfo(registryConfig, COMMITMENT);
+
+    if (!info) {
+      throw err;
+    }
+
+    console.log(
+      `\ninit_registry_config skipped — RegistryConfig already exists at ${registryConfig.toBase58()} (${info.data.length} bytes)`,
+    );
+  }
 
   const registerSignature = await program.methods
     .registerWorkClaim(
@@ -254,9 +268,9 @@ async function main(): Promise<void> {
     measurements,
   );
 
-  const rawHash2 = bytes(0x04);
-  const linkNonce2 = bytes(0x05);
-  const anchorNonce2 = bytes(0x06);
+  const rawHash2 = randomHash();
+  const linkNonce2 = randomHash();
+  const anchorNonce2 = randomHash();
 
   const contentArtifact2 = derive([
     Buffer.from("content"),
@@ -305,8 +319,8 @@ async function main(): Promise<void> {
     measurements,
   );
 
-  const rawContractHash = bytes(0x07);
-  const evidenceAnchorNonce = bytes(0x08);
+  const rawContractHash = randomHash();
+  const evidenceAnchorNonce = randomHash();
 
   const contractArtifact = derive([
     Buffer.from("contract_artifact"),
