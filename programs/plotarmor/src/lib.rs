@@ -28,7 +28,7 @@ use instructions::register_work_claim::__client_accounts_register_work_claim;
 pub use instructions::RegisterWorkClaim;
 pub use state::*;
 
-declare_id!("HSU9d7nCkGNWmBSCmwWpTHBZCHiNFhwFC4e9M2jWFFCm");
+declare_id!("3h9CzV9MJDeD5yjhVhdE6cupuXVRnLW1Cu6P14EJBKv2");
 
 #[program]
 pub mod plotarmor {

@@ -11,7 +11,7 @@ import os from "os";
 import path from "path";
 
 const PROGRAM_ID = new PublicKey(
-  "HSU9d7nCkGNWmBSCmwWpTHBZCHiNFhwFC4e9M2jWFFCm",
+  "3h9CzV9MJDeD5yjhVhdE6cupuXVRnLW1Cu6P14EJBKv2",
 );
 const COMMITMENT = "confirmed";
 

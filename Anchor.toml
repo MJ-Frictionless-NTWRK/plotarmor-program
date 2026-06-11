@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-plotarmor = "HSU9d7nCkGNWmBSCmwWpTHBZCHiNFhwFC4e9M2jWFFCm"
+plotarmor = "3h9CzV9MJDeD5yjhVhdE6cupuXVRnLW1Cu6P14EJBKv2"
 
 [provider]
 cluster = "localnet"
