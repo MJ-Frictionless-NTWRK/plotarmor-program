@@ -367,6 +367,188 @@ async function main(): Promise<void> {
     measurements,
   );
 
+  // SCENARIO 1 — anchor_authorized_contract (positive)
+  const rawContractHash2 = randomHash();
+  const authNonce = randomHash();
+
+  const contractArtifact2 = derive([
+    Buffer.from("contract_artifact"),
+    Buffer.from(rawContractHash2),
+  ]);
+  const authorizedContractAnchor = derive([
+    Buffer.from("authorized_contract"),
+    workClaim.toBuffer(),
+    contractArtifact2.toBuffer(),
+  ]);
+  const authAnchorRecord = derive([
+    Buffer.from("anchor"),
+    authorizedContractAnchor.toBuffer(),
+    Buffer.from(authNonce),
+  ]);
+
+  const authorizedSignature = await program.methods
+    .anchorAuthorizedContract(rawContractHash2, 1, authNonce, 1)
+    .accountsStrict({
+      registryConfig,
+      workClaim,
+      ownership,
+      contractArtifact: contractArtifact2,
+      authorizedContractAnchor,
+      anchorRecord: authAnchorRecord,
+      admin: payer.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  await recordMeasurements(
+    connection,
+    "anchor_authorized_contract",
+    authorizedSignature,
+    [
+      { name: "ContractArtifact", pubkey: contractArtifact2 },
+      { name: "AuthorizedContractAnchor", pubkey: authorizedContractAnchor },
+      { name: "AnchorRecord", pubkey: authAnchorRecord },
+    ],
+    measurements,
+  );
+
+  // SCENARIO 2 — add_owner (positive)
+  const newOwner = Keypair.generate();
+  const newOwnerRecord = derive([
+    Buffer.from("owner"),
+    ownership.toBuffer(),
+    newOwner.publicKey.toBuffer(),
+  ]);
+
+  const addOwnerSignature = await program.methods
+    .addOwner(30, 1, 100)
+    .accountsStrict({
+      registryConfig,
+      workClaim,
+      ownership,
+      newOwnerRecord,
+      admin: payer.publicKey,
+      newOwner: newOwner.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  await recordMeasurements(
+    connection,
+    "add_owner",
+    addOwnerSignature,
+    [{ name: "OwnerRecord", pubkey: newOwnerRecord }],
+    measurements,
+  );
+
+  // SCENARIO 3 — add_version with stale expected_previous_link (negative)
+  const rawHash3 = randomHash();
+  const linkNonce3 = randomHash();
+  const anchorNonce3 = randomHash();
+
+  const contentArtifact3 = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash3),
+  ]);
+  const claimArtifactLink3 = derive([
+    Buffer.from("claim_artifact"),
+    workClaim.toBuffer(),
+    Buffer.from(linkNonce3),
+  ]);
+  const anchorRecord3 = derive([
+    Buffer.from("anchor"),
+    contentArtifact3.toBuffer(),
+    Buffer.from(anchorNonce3),
+  ]);
+
+  console.log("\nadd_version (stale head — expect StaleLineageHead 6001)");
+  try {
+    await program.methods
+      .addVersion(rawHash3, 1, linkNonce3, anchorNonce3, 1, claimArtifactLink1)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        contentArtifact: contentArtifact3,
+        claimArtifactLink: claimArtifactLink3,
+        anchorRecord: anchorRecord3,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("ERROR — transaction succeeded but should have reverted");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("StaleLineageHead") || msg.includes("6001");
+
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 4 — register_work_claim with invalid claim_kind=99 (negative)
+  const rawHash4 = randomHash();
+  const linkNonce4 = randomHash();
+  const anchorNonce4 = randomHash();
+
+  const contentArtifact4 = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash4),
+  ]);
+  const workClaim4 = derive([
+    Buffer.from("claim"),
+    contentArtifact4.toBuffer(),
+    payer.publicKey.toBuffer(),
+  ]);
+  const ownership4 = derive([
+    Buffer.from("ownership"),
+    workClaim4.toBuffer(),
+  ]);
+  const ownerRecord4 = derive([
+    Buffer.from("owner"),
+    ownership4.toBuffer(),
+    payer.publicKey.toBuffer(),
+  ]);
+  const claimArtifactLink4 = derive([
+    Buffer.from("claim_artifact"),
+    workClaim4.toBuffer(),
+    Buffer.from(linkNonce4),
+  ]);
+  const anchorRecord4 = derive([
+    Buffer.from("anchor"),
+    workClaim4.toBuffer(),
+    Buffer.from(anchorNonce4),
+  ]);
+
+  console.log(
+    "\nregister_work_claim (claim_kind=99 — expect AnchorModeNotAllowed 6002)",
+  );
+  try {
+    await program.methods
+      .registerWorkClaim(rawHash4, 99, 1, 100, 100, linkNonce4, anchorNonce4, 1)
+      .accountsStrict({
+        registryConfig,
+        contentArtifact: contentArtifact4,
+        workClaim: workClaim4,
+        ownership: ownership4,
+        ownerRecord: ownerRecord4,
+        claimArtifactLink: claimArtifactLink4,
+        anchorRecord: anchorRecord4,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("ERROR — transaction succeeded but should have reverted");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("AnchorModeNotAllowed") || msg.includes("6002");
+
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
   console.log("\nMeasurement summary");
   console.table(
     measurements.map(
