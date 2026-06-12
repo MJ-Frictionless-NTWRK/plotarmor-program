@@ -652,6 +652,242 @@ async function main(): Promise<void> {
   // WorkClaim closure is unsupported in v1. Triggering this path requires a program
   // upgrade or a test-only backdoor, neither of which belongs in this devnet script.
 
+  // SCENARIO 9 — register_work_claim with total_shares=0 (expect ShareSumMismatch 6005)
+  // register_work_claim.rs:107 requires total_shares > 0 && threshold_shares > 0.
+  // The check is in the handler body; init accounts are attempted first then rolled back
+  // atomically on revert. Success is logged as a finding rather than a hard FAIL.
+  const rawHash9 = randomHash();
+  const linkNonce9 = randomHash();
+  const anchorNonce9 = randomHash();
+
+  const contentArtifact9 = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash9),
+  ]);
+  const workClaim9 = derive([
+    Buffer.from("claim"),
+    contentArtifact9.toBuffer(),
+    payer.publicKey.toBuffer(),
+  ]);
+  const ownership9 = derive([Buffer.from("ownership"), workClaim9.toBuffer()]);
+  const ownerRecord9 = derive([
+    Buffer.from("owner"),
+    ownership9.toBuffer(),
+    payer.publicKey.toBuffer(),
+  ]);
+  const claimArtifactLink9 = derive([
+    Buffer.from("claim_artifact"),
+    workClaim9.toBuffer(),
+    Buffer.from(linkNonce9),
+  ]);
+  const registrationAnchorRecord9 = derive([
+    Buffer.from("anchor"),
+    workClaim9.toBuffer(),
+    Buffer.from(anchorNonce9),
+  ]);
+
+  console.log(
+    "\nregister_work_claim (total_shares=0 — expect ShareSumMismatch 6005)",
+  );
+  try {
+    await program.methods
+      .registerWorkClaim(rawHash9, 1, 1, 0, 0, linkNonce9, anchorNonce9, 1)
+      .accountsStrict({
+        registryConfig,
+        contentArtifact: contentArtifact9,
+        workClaim: workClaim9,
+        ownership: ownership9,
+        ownerRecord: ownerRecord9,
+        claimArtifactLink: claimArtifactLink9,
+        anchorRecord: registrationAnchorRecord9,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const wc9 = await program.account.workClaim.fetch(workClaim9);
+    const own9 = await program.account.ownership.fetch(ownership9);
+    console.log(
+      `FINDING: total_shares=0 accepted — workClaim9.latestLink=${wc9.latestLink.toBase58()}, ownership9.totalShares=${own9.totalShares}`,
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected = msg.includes("ShareSumMismatch") || msg.includes("6005");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 10 — register_work_claim with claim_kind=255 (expect AnchorModeNotAllowed 6002)
+  // Confirms ClaimKind::from_u8 rejects the u8 max boundary identically to an arbitrary
+  // out-of-range value (99 in scenario 6). Fresh PDAs are needed because scenario 9 rolled back.
+  const rawHash10 = randomHash();
+  const linkNonce10 = randomHash();
+  const anchorNonce10 = randomHash();
+
+  const contentArtifact10 = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash10),
+  ]);
+  const workClaim10 = derive([
+    Buffer.from("claim"),
+    contentArtifact10.toBuffer(),
+    payer.publicKey.toBuffer(),
+  ]);
+  const ownership10 = derive([
+    Buffer.from("ownership"),
+    workClaim10.toBuffer(),
+  ]);
+  const ownerRecord10 = derive([
+    Buffer.from("owner"),
+    ownership10.toBuffer(),
+    payer.publicKey.toBuffer(),
+  ]);
+  const claimArtifactLink10 = derive([
+    Buffer.from("claim_artifact"),
+    workClaim10.toBuffer(),
+    Buffer.from(linkNonce10),
+  ]);
+  const registrationAnchorRecord10 = derive([
+    Buffer.from("anchor"),
+    workClaim10.toBuffer(),
+    Buffer.from(anchorNonce10),
+  ]);
+
+  console.log(
+    "\nregister_work_claim (claim_kind=255 — expect AnchorModeNotAllowed 6002)",
+  );
+  try {
+    await program.methods
+      .registerWorkClaim(
+        rawHash10,
+        255,
+        1,
+        100,
+        100,
+        linkNonce10,
+        anchorNonce10,
+        1,
+      )
+      .accountsStrict({
+        registryConfig,
+        contentArtifact: contentArtifact10,
+        workClaim: workClaim10,
+        ownership: ownership10,
+        ownerRecord: ownerRecord10,
+        claimArtifactLink: claimArtifactLink10,
+        anchorRecord: registrationAnchorRecord10,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("ERROR — transaction succeeded but should have reverted");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("AnchorModeNotAllowed") || msg.includes("6002");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 11 — two add_version instructions in one transaction (expect atomic revert)
+  // Both instructions pass claimArtifactLink2 as expected_previous_link (the current head).
+  // Instruction A advances latest_link to claimArtifactLink11a inside the same tx; when
+  // instruction B runs, its expected_previous_link no longer matches, triggering
+  // StaleLineageHead. Solana transactions are all-or-nothing: the whole tx must revert and
+  // latest_link must remain claimArtifactLink2. A partial state change would be a serious
+  // atomicity violation.
+  const rawHash11a = randomHash();
+  const linkNonce11a = randomHash();
+  const anchorNonce11a = randomHash();
+  const rawHash11b = randomHash();
+  const linkNonce11b = randomHash();
+  const anchorNonce11b = randomHash();
+
+  const contentArtifact11a = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash11a),
+  ]);
+  const claimArtifactLink11a = derive([
+    Buffer.from("claim_artifact"),
+    workClaim.toBuffer(),
+    Buffer.from(linkNonce11a),
+  ]);
+  const anchorRecord11a = derive([
+    Buffer.from("anchor"),
+    contentArtifact11a.toBuffer(),
+    Buffer.from(anchorNonce11a),
+  ]);
+
+  const contentArtifact11b = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash11b),
+  ]);
+  const claimArtifactLink11b = derive([
+    Buffer.from("claim_artifact"),
+    workClaim.toBuffer(),
+    Buffer.from(linkNonce11b),
+  ]);
+  const anchorRecord11b = derive([
+    Buffer.from("anchor"),
+    contentArtifact11b.toBuffer(),
+    Buffer.from(anchorNonce11b),
+  ]);
+
+  const ix11a = await program.methods
+    .addVersion(rawHash11a, 1, linkNonce11a, anchorNonce11a, 1, claimArtifactLink2)
+    .accountsStrict({
+      registryConfig,
+      workClaim,
+      contentArtifact: contentArtifact11a,
+      claimArtifactLink: claimArtifactLink11a,
+      anchorRecord: anchorRecord11a,
+      signer: payer.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+
+  const ix11b = await program.methods
+    .addVersion(rawHash11b, 1, linkNonce11b, anchorNonce11b, 1, claimArtifactLink2)
+    .accountsStrict({
+      registryConfig,
+      workClaim,
+      contentArtifact: contentArtifact11b,
+      claimArtifactLink: claimArtifactLink11b,
+      anchorRecord: anchorRecord11b,
+      signer: payer.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+
+  console.log(
+    "\nadd_version x2 in one tx, same expected_previous_link (expect atomic revert — StaleLineageHead 6001)",
+  );
+  try {
+    const tx11 = new Transaction().add(ix11a, ix11b);
+    await provider.sendAndConfirm(tx11);
+    console.log(
+      "FINDING: both add_version instructions succeeded in one tx — latest_link may have advanced",
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected = msg.includes("StaleLineageHead") || msg.includes("6001");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // Ground-truth atomicity check: latest_link must still equal claimArtifactLink2.
+  const wcAfter11 = await program.account.workClaim.fetch(workClaim);
+  const latestLinkAfter11 = wcAfter11.latestLink.toBase58();
+  const latestLinkExpected11 = claimArtifactLink2.toBase58();
+  if (latestLinkAfter11 === latestLinkExpected11) {
+    console.log("ATOMICITY CONFIRMED: latest_link unchanged from claimArtifactLink2");
+  } else {
+    console.log(
+      `FINDING: latest_link changed to ${latestLinkAfter11} (expected ${latestLinkExpected11}) — partial state change persisted`,
+    );
+  }
+
   console.log("\nMeasurement summary");
   console.table(
     measurements.map(
