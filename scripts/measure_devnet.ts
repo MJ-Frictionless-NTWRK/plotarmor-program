@@ -4,6 +4,7 @@ import {
   Keypair,
   PublicKey,
   SystemProgram,
+  Transaction,
   clusterApiUrl,
 } from "@solana/web3.js";
 import { randomBytes } from "crypto";
@@ -548,6 +549,108 @@ async function main(): Promise<void> {
     console.log(isExpected ? "PASS" : "FAIL — unexpected error");
     console.log(`Error: ${msg}`);
   }
+
+  // SCENARIO 5 — wrong claimant cannot add_version (expect Unauthorized 6009)
+  // Fund wrongClaimant from payer instead of airdrop; Helius devnet RPC does not proxy the faucet.
+  // wrongClaimant needs lamports for the init accounts (claim_artifact_link, anchor_record) because
+  // Anchor's init constraints run before the handler body Unauthorized check. The lamports are
+  // returned when the transaction reverts atomically on Unauthorized.
+  const wrongClaimant = Keypair.generate();
+  const fundTx5 = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: wrongClaimant.publicKey,
+      lamports: 5_000_000,
+    }),
+  );
+  await provider.sendAndConfirm(fundTx5);
+
+  const rawHash5 = randomHash();
+  const linkNonce5 = randomHash();
+  const anchorNonce5 = randomHash();
+
+  const contentArtifact5 = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash5),
+  ]);
+  const claimArtifactLink5 = derive([
+    Buffer.from("claim_artifact"),
+    workClaim.toBuffer(),
+    Buffer.from(linkNonce5),
+  ]);
+  const anchorRecord5 = derive([
+    Buffer.from("anchor"),
+    contentArtifact5.toBuffer(),
+    Buffer.from(anchorNonce5),
+  ]);
+
+  console.log("\nadd_version (wrong claimant — expect Unauthorized 6009)");
+  try {
+    await program.methods
+      .addVersion(rawHash5, 1, linkNonce5, anchorNonce5, 1, claimArtifactLink2)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        contentArtifact: contentArtifact5,
+        claimArtifactLink: claimArtifactLink5,
+        anchorRecord: anchorRecord5,
+        signer: wrongClaimant.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([wrongClaimant])
+      .rpc();
+
+    console.log("ERROR — transaction succeeded but should have reverted");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected = msg.includes("Unauthorized") || msg.includes("6009");
+
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 6 — add_owner threshold > new_total (expect ShareSumMismatch 6005)
+  // State after scenario 2: total_shares = 130. new_share = 10 → new_total = 140.
+  // new_threshold_shares = 141 violates the require!(new_threshold_shares <= new_total) check.
+  const newOwner2 = Keypair.generate();
+  const newOwnerRecord2 = derive([
+    Buffer.from("owner"),
+    ownership.toBuffer(),
+    newOwner2.publicKey.toBuffer(),
+  ]);
+
+  console.log(
+    "\nadd_owner (threshold > new total — expect ShareSumMismatch 6005)",
+  );
+  try {
+    await program.methods
+      .addOwner(10, 1, 141)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        ownership,
+        newOwnerRecord: newOwnerRecord2,
+        admin: payer.publicKey,
+        newOwner: newOwner2.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("ERROR — transaction succeeded but should have reverted");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("ShareSumMismatch") || msg.includes("6005");
+
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 7 — SupersededClaim (6010) cannot be constructed in a single script run.
+  // add_version checks work_claim.superseded_by == Pubkey::default() and reverts with
+  // SupersededClaim if the field is non-zero. However, no v1 instruction sets that field;
+  // WorkClaim closure is unsupported in v1. Triggering this path requires a program
+  // upgrade or a test-only backdoor, neither of which belongs in this devnet script.
 
   console.log("\nMeasurement summary");
   console.table(
