@@ -888,6 +888,179 @@ async function main(): Promise<void> {
     );
   }
 
+  // SCENARIO 12 — add_owner with new_share=0 (expect ShareSumMismatch 6005)
+  // add_owner.rs:55 has a dedicated require!(new_share > 0, ShareSumMismatch) in the
+  // handler body. The new_owner_record init constraint runs first (admin=payer pays rent),
+  // then the handler fires and reverts; the account creation is rolled back atomically.
+  // Current ownership state: total_shares=130 (100 from registration + 30 from scenario 2).
+  const newOwner3 = Keypair.generate();
+  const newOwnerRecord3 = derive([
+    Buffer.from("owner"),
+    ownership.toBuffer(),
+    newOwner3.publicKey.toBuffer(),
+  ]);
+
+  console.log("\nadd_owner (new_share=0 — expect ShareSumMismatch 6005)");
+  try {
+    await program.methods
+      .addOwner(0, 1, 130)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        ownership,
+        newOwnerRecord: newOwnerRecord3,
+        admin: payer.publicKey,
+        newOwner: newOwner3.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const own12 = await program.account.ownership.fetch(ownership);
+    console.log(
+      `FINDING: new_share=0 accepted — ownership.totalShares=${own12.totalShares}`,
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected = msg.includes("ShareSumMismatch") || msg.includes("6005");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 13 — content-addressing convergence: two claimants register the same raw_hash
+  // contentArtifact uses init_if_needed (register_work_claim.rs:30). Registration B with the
+  // same rawHash13 finds the account already initialized, skips creation and field writes
+  // (is_initialized guard at rs:130), then creates all B-specific accounts normally.
+  // Both registrations should succeed; exactly one ContentArtifact account should exist.
+  const rawHash13 = randomHash();
+  const linkNonce13a = randomHash();
+  const anchorNonce13a = randomHash();
+  const linkNonce13b = randomHash();
+  const anchorNonce13b = randomHash();
+
+  const contentArtifact13 = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash13),
+  ]);
+
+  // Registration A — payer as claimant.
+  const workClaimA = derive([
+    Buffer.from("claim"),
+    contentArtifact13.toBuffer(),
+    payer.publicKey.toBuffer(),
+  ]);
+  const ownershipA = derive([Buffer.from("ownership"), workClaimA.toBuffer()]);
+  const ownerRecordA = derive([
+    Buffer.from("owner"),
+    ownershipA.toBuffer(),
+    payer.publicKey.toBuffer(),
+  ]);
+  const claimArtifactLinkA = derive([
+    Buffer.from("claim_artifact"),
+    workClaimA.toBuffer(),
+    Buffer.from(linkNonce13a),
+  ]);
+  const anchorRecordA = derive([
+    Buffer.from("anchor"),
+    workClaimA.toBuffer(),
+    Buffer.from(anchorNonce13a),
+  ]);
+
+  console.log("\nregister_work_claim A (rawHash13, payer as claimant — expect success)");
+  try {
+    await program.methods
+      .registerWorkClaim(rawHash13, 1, 1, 100, 100, linkNonce13a, anchorNonce13a, 1)
+      .accountsStrict({
+        registryConfig,
+        contentArtifact: contentArtifact13,
+        workClaim: workClaimA,
+        ownership: ownershipA,
+        ownerRecord: ownerRecordA,
+        claimArtifactLink: claimArtifactLinkA,
+        anchorRecord: anchorRecordA,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("PASS — registration A succeeded");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`FAIL — registration A reverted unexpectedly: ${msg}`);
+  }
+
+  // Registration B — claimant2 registers the same rawHash13; workClaimB is a different PDA.
+  // Fund claimant2 from payer. Covers 5 account inits (contentArtifact13 already exists,
+  // so init_if_needed skips it). Rent-exempt totals: WorkClaim 2,352,480 + Ownership
+  // 1,656,480 + OwnerRecord 1,412,880 + ClaimArtifactLink 1,670,400 + AnchorRecord
+  // 1,461,600 = 8,553,840 lamports. Use 10,000,000 for headroom.
+  const claimant2 = Keypair.generate();
+  const fundTx13 = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: claimant2.publicKey,
+      lamports: 10_000_000,
+    }),
+  );
+  await provider.sendAndConfirm(fundTx13);
+
+  const workClaimB = derive([
+    Buffer.from("claim"),
+    contentArtifact13.toBuffer(),
+    claimant2.publicKey.toBuffer(),
+  ]);
+  const ownershipB = derive([Buffer.from("ownership"), workClaimB.toBuffer()]);
+  const ownerRecordB = derive([
+    Buffer.from("owner"),
+    ownershipB.toBuffer(),
+    claimant2.publicKey.toBuffer(),
+  ]);
+  const claimArtifactLinkB = derive([
+    Buffer.from("claim_artifact"),
+    workClaimB.toBuffer(),
+    Buffer.from(linkNonce13b),
+  ]);
+  const anchorRecordB = derive([
+    Buffer.from("anchor"),
+    workClaimB.toBuffer(),
+    Buffer.from(anchorNonce13b),
+  ]);
+
+  console.log("\nregister_work_claim B (same rawHash13, claimant2 — expect convergence/success)");
+  try {
+    await program.methods
+      .registerWorkClaim(rawHash13, 1, 1, 100, 100, linkNonce13b, anchorNonce13b, 1)
+      .accountsStrict({
+        registryConfig,
+        contentArtifact: contentArtifact13,
+        workClaim: workClaimB,
+        ownership: ownershipB,
+        ownerRecord: ownerRecordB,
+        claimArtifactLink: claimArtifactLinkB,
+        anchorRecord: anchorRecordB,
+        signer: claimant2.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([claimant2])
+      .rpc();
+
+    console.log("PASS — registration B succeeded; ContentArtifact reused via init_if_needed");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(
+      `FINDING: registration B reverted — paper describes convergence but code may require a different path: ${msg}`,
+    );
+  }
+
+  // Ground truth: exactly one ContentArtifact must exist at contentArtifact13, regardless of outcome.
+  const ca13Info = await connection.getAccountInfo(contentArtifact13, COMMITMENT);
+  if (ca13Info) {
+    console.log(
+      `ContentArtifact13 exists: owner=${ca13Info.owner.toBase58()}, dataLength=${ca13Info.data.length} bytes`,
+    );
+  } else {
+    console.log("FINDING: ContentArtifact13 does not exist after both registrations");
+  }
+
   console.log("\nMeasurement summary");
   console.table(
     measurements.map(
