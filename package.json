@@ -1,6 +1,9 @@
 {
   "license": "ISC",
   "scripts": {
+    "test:ts": "anchor test",
+    "test:rs": "cargo test",
+    "test": "cargo test && anchor test",
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
   },

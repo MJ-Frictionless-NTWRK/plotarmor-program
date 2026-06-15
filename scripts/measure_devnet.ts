@@ -163,6 +163,19 @@ async function main(): Promise<void> {
   const program = new anchor.Program(idl, provider) as any;
   const measurements: AccountMeasurement[] = [];
 
+  // Test harness: intercept console.log to count PASS/FAIL outcomes.
+  // Lines starting with "PASS" are counted as passes; lines starting with
+  // "FAIL" or "ERROR —" are counted as failures. FINDING lines are neutral.
+  let passes = 0;
+  let failures = 0;
+  const _origLog = console.log.bind(console);
+  console.log = (...args: unknown[]) => {
+    _origLog(...args);
+    const first = String(args[0] ?? "");
+    if (/^PASS\b/.test(first)) passes++;
+    else if (/^FAIL\b/.test(first) || /^ERROR —/.test(first)) failures++;
+  };
+
   console.log(`Program: ${PROGRAM_ID.toBase58()}`);
   console.log(`Payer/authority: ${payer.publicKey.toBase58()}`);
 
@@ -1061,6 +1074,366 @@ async function main(): Promise<void> {
     console.log("FINDING: ContentArtifact13 does not exist after both registrations");
   }
 
+  // SCENARIO 14 — add_owner with new_threshold_shares=0 (expect ShareSumMismatch 6005)
+  // add_owner.rs:68 requires new_threshold_shares > 0 && new_threshold_shares <= new_total.
+  // With new_threshold_shares=0, the first condition is false; fires before the threshold/total
+  // comparison (distinct from scenario 8's "threshold > new_total" case).
+  const newOwner4 = Keypair.generate();
+  const newOwnerRecord4 = derive([
+    Buffer.from("owner"),
+    ownership.toBuffer(),
+    newOwner4.publicKey.toBuffer(),
+  ]);
+
+  console.log("\nadd_owner (new_threshold_shares=0 — expect ShareSumMismatch 6005)");
+  try {
+    await program.methods
+      .addOwner(10, 1, 0)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        ownership,
+        newOwnerRecord: newOwnerRecord4,
+        admin: payer.publicKey,
+        newOwner: newOwner4.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const own14 = await program.account.ownership.fetch(ownership);
+    console.log(
+      `FINDING: threshold=0 accepted — ownership.thresholdShares=${own14.thresholdShares}`,
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected = msg.includes("ShareSumMismatch") || msg.includes("6005");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 15 — add_owner for an already-existing co-owner pubkey (expect "already in use")
+  // newOwner was added in the positive scenario 2. The newOwnerRecord PDA already exists and
+  // is owned by the program. Anchor's init constraint calls System Program create_account,
+  // which rejects with AccountAlreadyInUse (0x0) before the handler body runs.
+  console.log("\nadd_owner (duplicate pubkey — expect 'already in use')");
+  try {
+    await program.methods
+      .addOwner(10, 1, 130)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        ownership,
+        newOwnerRecord,
+        admin: payer.publicKey,
+        newOwner: newOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("FINDING: duplicate add_owner succeeded");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("already in use") ||
+      msg.includes("0x0") ||
+      msg.includes("AccountDiscriminatorAlreadySet");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 16 — add_version reusing rawHash1 (root hash appears again in the chain)
+  // Tests the "same ContentArtifact may appear more than once in one linear chain" invariant.
+  // contentArtifact1 already exists; init_if_needed skips creation and the is_initialized
+  // guard (add_version.rs:111) skips all field writes. A new ClaimArtifactLink is created
+  // pointing to the existing contentArtifact1. Both latest_link and latest_artifact advance.
+  // Expected to SUCCEED.
+  const linkNonce16 = randomHash();
+  const anchorNonce16 = randomHash();
+
+  const claimArtifactLink16 = derive([
+    Buffer.from("claim_artifact"),
+    workClaim.toBuffer(),
+    Buffer.from(linkNonce16),
+  ]);
+  const anchorRecord16 = derive([
+    Buffer.from("anchor"),
+    contentArtifact1.toBuffer(),
+    Buffer.from(anchorNonce16),
+  ]);
+
+  console.log(
+    "\nadd_version (rawHash1 reuse in same chain — expect success, chain reuse invariant)",
+  );
+  try {
+    await program.methods
+      .addVersion(rawHash1, 1, linkNonce16, anchorNonce16, 1, claimArtifactLink2)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        contentArtifact: contentArtifact1,
+        claimArtifactLink: claimArtifactLink16,
+        anchorRecord: anchorRecord16,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const wc16 = await program.account.workClaim.fetch(workClaim);
+    const latestArtifactIsRoot =
+      wc16.latestArtifact.toBase58() === contentArtifact1.toBase58();
+    const latestLinkAdvanced =
+      wc16.latestLink.toBase58() === claimArtifactLink16.toBase58();
+    console.log(
+      latestArtifactIsRoot && latestLinkAdvanced
+        ? "PASS — chain reuse confirmed: latest_artifact == contentArtifact1, latest_link advanced"
+        : `FAIL — unexpected state: latestArtifact=${wc16.latestArtifact.toBase58()}, latestLink=${wc16.latestLink.toBase58()}`,
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`FAIL — add_version reverted unexpectedly: ${msg}`);
+  }
+
+  // SCENARIO 17 — anchor_evidence_contract replay: same anchorer (payer) + same contractArtifact
+  // EvidenceAnchor uses init (anchor_evidence_contract.rs:33). The PDA
+  // ["evidence", payer.publicKey, contractArtifact] already exists from scenario 3.
+  // Anchor's init calls System Program create_account, which rejects with AccountAlreadyInUse.
+  // This confirms one EvidenceAnchor per (anchorer, contractArtifact) pair.
+  console.log(
+    "\nanchor_evidence_contract replay (same anchorer + contractArtifact — expect 'already in use')",
+  );
+  try {
+    await program.methods
+      .anchorEvidenceContract(
+        rawContractHash,
+        1,
+        evidenceAnchorNonce,
+        1,
+        workClaim,
+      )
+      .accountsStrict({
+        registryConfig,
+        contractArtifact,
+        evidenceAnchor,
+        anchorRecord: evidenceAnchorRecord,
+        anchorer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("FINDING: replay succeeded — duplicate EvidenceAnchor accepted");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("already in use") ||
+      msg.includes("0x0") ||
+      msg.includes("AccountDiscriminatorAlreadySet");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 18 — init_registry_config called a second time (expect "already in use")
+  // RegistryConfig uses init (init_registry_config.rs:8). The config PDA already exists.
+  // Anchor's init fires before the handler; System Program rejects create_account.
+  // Confirms known limitation B from CLAUDE.md: the PDA can only be initialized once,
+  // so whoever calls first seizes authority — but cannot be called again.
+  console.log(
+    "\ninit_registry_config (second call — expect 'already in use')",
+  );
+  try {
+    await program.methods
+      .initRegistryConfig()
+      .accountsStrict({
+        registryConfig,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log(
+      "FINDING: second init_registry_config succeeded — authority could be seized",
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("already in use") ||
+      msg.includes("0x0") ||
+      msg.includes("AccountDiscriminatorAlreadySet");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 19 — cross-claim: attacker calls add_version on workClaim (payer's)
+  // workClaim.claimant == payer.publicKey. An unrelated signer triggers
+  // add_version.rs:80 require!(signer == claimant) -> Unauthorized (6009).
+  // The three init accounts (contentArtifact, claimArtifactLink, anchorRecord) run first;
+  // attacker needs lamports to fund them temporarily (all returned on revert).
+  // claimArtifactLink16 is the correct current head after scenario 16 succeeded.
+  const attacker19 = Keypair.generate();
+  const fundTx19 = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: attacker19.publicKey,
+      lamports: 5_000_000,
+    }),
+  );
+  await provider.sendAndConfirm(fundTx19);
+
+  const rawHash19 = randomHash();
+  const linkNonce19 = randomHash();
+  const anchorNonce19 = randomHash();
+
+  const contentArtifact19 = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash19),
+  ]);
+  const claimArtifactLink19 = derive([
+    Buffer.from("claim_artifact"),
+    workClaim.toBuffer(),
+    Buffer.from(linkNonce19),
+  ]);
+  const anchorRecord19 = derive([
+    Buffer.from("anchor"),
+    contentArtifact19.toBuffer(),
+    Buffer.from(anchorNonce19),
+  ]);
+
+  console.log(
+    "\nadd_version (attacker on payer's workClaim — expect Unauthorized 6009)",
+  );
+  try {
+    await program.methods
+      .addVersion(
+        rawHash19,
+        1,
+        linkNonce19,
+        anchorNonce19,
+        1,
+        claimArtifactLink16,
+      )
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        contentArtifact: contentArtifact19,
+        claimArtifactLink: claimArtifactLink19,
+        anchorRecord: anchorRecord19,
+        signer: attacker19.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([attacker19])
+      .rpc();
+
+    console.log("FINDING: attacker add_version succeeded");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected = msg.includes("Unauthorized") || msg.includes("6009");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 20 — cross-claim: attacker calls anchor_authorized_contract on workClaim (payer's)
+  // ownership.admin == payer.publicKey. An unrelated admin signer triggers
+  // anchor_authorized_contract.rs:84 require!(admin == ownership.admin) -> Unauthorized (6009).
+  // Three init accounts run first (contractArtifact init_if_needed, authorizedContractAnchor
+  // init, anchorRecord init); all rolled back on revert.
+  const attacker20 = Keypair.generate();
+  const fundTx20 = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: attacker20.publicKey,
+      lamports: 5_000_000,
+    }),
+  );
+  await provider.sendAndConfirm(fundTx20);
+
+  const rawContractHash20 = randomHash();
+  const authNonce20 = randomHash();
+
+  const contractArtifact20 = derive([
+    Buffer.from("contract_artifact"),
+    Buffer.from(rawContractHash20),
+  ]);
+  const authorizedContractAnchor20 = derive([
+    Buffer.from("authorized_contract"),
+    workClaim.toBuffer(),
+    contractArtifact20.toBuffer(),
+  ]);
+  const authAnchorRecord20 = derive([
+    Buffer.from("anchor"),
+    authorizedContractAnchor20.toBuffer(),
+    Buffer.from(authNonce20),
+  ]);
+
+  console.log(
+    "\nanchor_authorized_contract (attacker as admin on payer's workClaim — expect Unauthorized 6009)",
+  );
+  try {
+    await program.methods
+      .anchorAuthorizedContract(rawContractHash20, 1, authNonce20, 1)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        ownership,
+        contractArtifact: contractArtifact20,
+        authorizedContractAnchor: authorizedContractAnchor20,
+        anchorRecord: authAnchorRecord20,
+        admin: attacker20.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([attacker20])
+      .rpc();
+
+    console.log("FINDING: attacker anchor_authorized_contract succeeded");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected = msg.includes("Unauthorized") || msg.includes("6009");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 21 — AuthorizedContractAnchor PDA collision: same (workClaim, contractArtifact2)
+  // anchor_authorized_contract.rs uses init for authorized_contract_anchor with seeds
+  // ["authorized_contract", work_claim, contract_artifact]. The PDA for (workClaim,
+  // contractArtifact2) was created in scenario 4. A second call with the same pair
+  // triggers Anchor's init constraint -> "already in use" before the handler runs.
+  // This is the on-chain enforcement of "one authorized anchor per (claim, contract)" pair.
+  const authNonce21 = randomHash();
+  const authAnchorRecord21 = derive([
+    Buffer.from("anchor"),
+    authorizedContractAnchor.toBuffer(),
+    Buffer.from(authNonce21),
+  ]);
+
+  console.log(
+    "\nanchor_authorized_contract (same workClaim + contractArtifact2 — expect 'already in use')",
+  );
+  try {
+    await program.methods
+      .anchorAuthorizedContract(rawContractHash2, 1, authNonce21, 1)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        ownership,
+        contractArtifact: contractArtifact2,
+        authorizedContractAnchor,
+        anchorRecord: authAnchorRecord21,
+        admin: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log(
+      "FINDING: second authorized anchor for same (claim, contract) pair succeeded",
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("already in use") ||
+      msg.includes("0x0") ||
+      msg.includes("AccountDiscriminatorAlreadySet");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
   console.log("\nMeasurement summary");
   console.table(
     measurements.map(
@@ -1081,6 +1454,14 @@ async function main(): Promise<void> {
       }),
     ),
   );
+
+  _origLog(
+    `\nScenario results: ${passes} passed, ${failures} failed` +
+      (failures > 0 ? " ← FAILURES ABOVE" : " — all green"),
+  );
+  if (failures > 0) {
+    throw new Error(`${failures} scenario(s) failed — see output above`);
+  }
 }
 
 main().catch((error) => {
