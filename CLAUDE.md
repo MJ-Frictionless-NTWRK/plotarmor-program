@@ -200,7 +200,13 @@ Rust 1.96.0, Solana CLI 4.0.1 (Agave), Anchor CLI 1.0.1, Node v24.10.0, Yarn 1.2
 NOTE: installer pulled newer versions than the white paper (paper specifies Solana 3.x,
 Anchor 0.32.1). Verify via the Solana MCP that no API change affects the canon before building.
 TS client: @coral-xyz/anchor + @solana/web3.js (or @solana/kit), wallet-adapter.
-Tests: prefer LiteSVM / anchor-bankrun for fast integration tests.
+Tests: two-layer suite.
+  Layer 1 — Rust/LiteSVM: `cargo test` runs 28 integration tests in
+    programs/plotarmor/tests/ (happy_paths.rs + security_tests.rs). Fast, no validator needed.
+  Layer 2 — TypeScript/Anchor: `anchor test` deploys to a local validator and runs 29
+    Mocha/Chai tests in tests/plotarmor.ts. Covers all six instructions with on-chain
+    state assertions and 17 rejection tests verifying every error code path.
+  Combined: `yarn test` runs cargo test then anchor test sequentially.
 
 ## Model guidance (Claude Pro: Sonnet default, Opus and Haiku both available on this plan)
 - Default model for this project: Sonnet. It handles structs, most instructions, tests, and wiring.
@@ -247,6 +253,47 @@ E. add_version checks claimant signature only, not threshold approval from Owner
 These findings were confirmed clean by the Solana MCP program_autofixer (zero mechanical
 issues) and identified by manual review against the spec. Prague auditors should review
 against Appendix C invariants and Appendix G acceptance checklist specifically.
+
+## Test coverage report (June 2026)
+
+Two suites run against the deployed program, totaling 57 tests: 28 Rust/LiteSVM and 29
+TypeScript/Mocha (local validator). All 57 pass as of commit 2b55abb.
+
+Invariants confirmed green by TypeScript on-chain assertions:
+- latest_link.content_artifact == latest_artifact after every chain-touching tx
+- add_version validates against latest_link, not latest_artifact (anti-fork)
+- Two add_version instructions in one tx: second fails StaleLineageHead, entire tx reverts
+  atomically — latest_link confirmed unchanged on-chain after revert
+- Registration always produces a root ClaimArtifactLink (previous_link = zero pubkey);
+  latest_link is never zero after registration
+- Content-addressing convergence: two claimants, one ContentArtifact, two independent
+  WorkClaims with different claimant pubkeys confirmed on-chain
+- Reserved fields (privacyMode=0, commitmentRoot=[0;32], discoverability=0) verified
+  on-chain for every account struct that carries them
+- AnchorRecord anchors workClaim (kind=0) for register_work_claim; contentArtifact (kind=1)
+  for add_version; evidenceAnchor (kind=2) for anchor_evidence_contract;
+  authorizedContractAnchor (kind=3) for anchor_authorized_contract
+
+Error codes confirmed rejecting correctly (all 17 negative TypeScript tests pass):
+  StaleLineageHead(6001), Unauthorized(6009) for both wrong-claimant and wrong-admin paths,
+  AnchorModeNotAllowed(6002) for content_kind=99/255 and claim_kind=99, ShareSumMismatch(6005)
+  for total=0, threshold>total, add_owner share=0 and threshold=0 and threshold>new_total,
+  already-in-use (System 0x0) for duplicate OwnerRecord, evidence replay, authorized PDA
+  collision, and init_registry_config second call.
+
+Implementation detail discovered during TypeScript testing (not a spec contradiction):
+  register_work_claim sets initial OwnerRecord.role = 0 (Unspecified). The white paper does
+  not specify the initial role value for the registering claimant. Note for future add_owner
+  callers: if Author role is required, it must be set via a subsequent add_owner call.
+
+devnet scenario coverage (scripts/measure_devnet.ts, 21 scenarios, all pass):
+  Scenarios 1-8: positive measurements (register, add_version, evidence, authorized, add_owner)
+  plus wrong-claimant, wrong-admin, simulated-mode rejections.
+  Scenarios 9-21: adversarial edge cases including share=0, claim_kind boundary (u8 255),
+  two-instruction atomicity, add_owner zero-share/zero-threshold/threshold>total, content-
+  addressing convergence, threshold=0, duplicate pubkey, chain hash reuse, evidence replay,
+  registry config replay, cross-claim add_version, cross-claim authorized contract,
+  AuthorizedContractAnchor PDA collision. All pass; harness exits non-zero on any failure.
 1. Rights Index ingestion: Supabase Edge Function listens for Solana events and writes to the database.
    No separate indexer service. Use a clean repository abstraction layer in the query code so the
    database can be swapped later without touching the rest of the codebase.
