@@ -1,7 +1,7 @@
 # PlotArmor Anchor Program — Build Context
 
 You are implementing an already-locked specification. Do NOT redesign the architecture.
-The full spec is the PlotArmor White Paper v2.75. This file is the cheat-sheet. When a
+The full spec is the PlotArmor White Paper v2.83. This file is the cheat-sheet. When a
 detail is missing here, ask for the relevant white-paper appendix rather than inventing it.
 
 Prefer the Solana Developer MCP tools over your own memory for any Solana or Anchor API
@@ -250,6 +250,8 @@ E. add_version checks claimant signature only, not threshold approval from Owner
    that decision lands. Sections D.2 and 15.6 in the white paper are scoped to v1 single-
    claimant flows; this limitation is acknowledged and documented, not a hidden gap.
 
+Implementation detail (not a limitation): register_work_claim sets initial OwnerRecord.role = 0 (Unspecified). If Author attribution is required, it must be set via a subsequent add_owner call.
+
 These findings were confirmed clean by the Solana MCP program_autofixer (zero mechanical
 issues) and identified by manual review against the spec. Prague auditors should review
 against Appendix C invariants and Appendix G acceptance checklist specifically.
@@ -294,6 +296,8 @@ devnet scenario coverage (scripts/measure_devnet.ts, 21 scenarios, all pass):
   addressing convergence, threshold=0, duplicate pubkey, chain hash reuse, evidence replay,
   registry config replay, cross-claim add_version, cross-claim authorized contract,
   AuthorizedContractAnchor PDA collision. All pass; harness exits non-zero on any failure.
+
+Auditor brief: AUDITOR_BRIEF.md in the repo root covers test coverage, invariants, error codes, known limitations A-E, and audit focus areas. Commit: 800fa99.
 1. Rights Index ingestion: Supabase Edge Function listens for Solana events and writes to the database.
    No separate indexer service. Use a clean repository abstraction layer in the query code so the
    database can be swapped later without touching the rest of the codebase.
