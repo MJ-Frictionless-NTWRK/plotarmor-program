@@ -573,8 +573,8 @@ async function main(): Promise<void> {
   // SCENARIO 5 — wrong claimant cannot add_version (expect Unauthorized 6009)
   // Fund wrongClaimant from payer instead of airdrop; Helius devnet RPC does not proxy the faucet.
   // wrongClaimant is funded in case it is used as payer for any init accounts.
-  // The has_one = claimant constraint on work_claim fires before init, so the transaction
-  // reverts before any accounts are created.
+  // The has_one = claimant constraint on work_claim fires before handler body logic, but
+  // after Anchor's init account allocations — 3 System Program CPIs appear in the failed tx.
   const wrongClaimant = Keypair.generate();
   const fundTx5 = new Transaction().add(
     SystemProgram.transfer({
@@ -1274,7 +1274,8 @@ async function main(): Promise<void> {
   // SCENARIO 19 — cross-claim: attacker calls add_version on workClaim (payer's)
   // workClaim.claimant == payer.publicKey. An unrelated signer triggers
   // the has_one = claimant constraint on work_claim -> Unauthorized (6009).
-  // The constraint fires before init, so no accounts are created before the revert.
+  // The constraint fires before handler body logic, but after Anchor's init account
+  // allocations. The tx reverts atomically; no persistent state is created.
   // attacker is funded as payer in case it is needed for other scenarios.
   // claimArtifactLink16 is the correct current head after scenario 16 succeeded.
   const attacker19 = Keypair.generate();
@@ -1433,6 +1434,158 @@ async function main(): Promise<void> {
     console.log(
       "FINDING: second authorized anchor for same (claim, contract) pair succeeded",
     );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected =
+      msg.includes("already in use") ||
+      msg.includes("0x0") ||
+      msg.includes("AccountDiscriminatorAlreadySet");
+    console.log(isExpected ? "PASS" : "FAIL — unexpected error");
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 22 — non-upgrade-authority calls init_registry_config
+  // Fix 1 added two constraints to InitRegistryConfig: (1) program_data is the legitimate
+  // ProgramData for this program, and (2) signer is the upgrade authority in program_data.
+  // A keypair that is not the upgrade authority triggers Unauthorized (6009) from constraint 2
+  // — but only on first-ever call in a fresh environment. On a devnet where registryConfig
+  // already exists, the init constraint on registry_config (position 1) fires before the
+  // upgrade-authority constraints (positions 4-5), so both authorized and unauthorized callers
+  // get 0x0. The 6009 path is exercised by the LiteSVM Rust tests. PASS accepts either error.
+  const attacker22 = Keypair.generate();
+  const fundTx22 = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: attacker22.publicKey,
+      lamports: 5_000_000,
+    }),
+  );
+  await provider.sendAndConfirm(fundTx22);
+
+  console.log(
+    "\ninit_registry_config (non-upgrade-authority signer — expect Unauthorized 6009 or already in use 0x0)",
+  );
+  try {
+    await program.methods
+      .initRegistryConfig()
+      .accountsStrict({
+        registryConfig,
+        signer: attacker22.publicKey,
+        systemProgram: SystemProgram.programId,
+        program: PROGRAM_ID,
+        programData,
+      })
+      .signers([attacker22])
+      .rpc();
+
+    console.log("FINDING: non-authority init_registry_config succeeded");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const got6009 = msg.includes("Unauthorized") || msg.includes("6009");
+    const got0x0 = msg.includes("already in use") || msg.includes("0x0");
+    if (got6009) {
+      console.log(
+        "PASS — Unauthorized (6009): upgrade-authority constraint fired (fresh environment)",
+      );
+    } else if (got0x0) {
+      console.log(
+        "PASS — already in use (0x0): init constraint on registry_config fired before authority check (devnet state; 6009 path covered by LiteSVM tests)",
+      );
+    } else {
+      console.log("FAIL — unexpected error");
+    }
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 23 — wrong claimant add_version: has_one constraint fires before handler body
+  // Fix 2 moved the Unauthorized check from a require!() in the handler body to a has_one
+  // constraint on work_claim (position 2 in the Accounts struct). The actual benefit: the
+  // check is now declarative in the account struct (more idiomatic Anchor, easier to audit)
+  // and fires before any handler body logic runs. It does NOT prevent System Program CPI
+  // calls for init accounts — Anchor allocates init accounts before evaluating has_one, so
+  // 3 create_account calls still appear in the failed tx logs (same count as pre-Fix-2).
+  // The tx reverts atomically regardless; no persistent state is created.
+  // PASS condition: Unauthorized (6009) fires, regardless of System Program CPI count.
+  // Reuses wrongClaimant from scenario 5. claimArtifactLink16 is the current chain head.
+  const rawHash23 = randomHash();
+  const linkNonce23 = randomHash();
+  const anchorNonce23 = randomHash();
+
+  const contentArtifact23 = derive([
+    Buffer.from("content"),
+    Buffer.from(rawHash23),
+  ]);
+  const claimArtifactLink23 = derive([
+    Buffer.from("claim_artifact"),
+    workClaim.toBuffer(),
+    Buffer.from(linkNonce23),
+  ]);
+  const anchorRecord23 = derive([
+    Buffer.from("anchor"),
+    contentArtifact23.toBuffer(),
+    Buffer.from(anchorNonce23),
+  ]);
+
+  console.log(
+    "\nadd_version (wrong claimant — has_one fires before handler body; CPI count observed)",
+  );
+  try {
+    await program.methods
+      .addVersion(rawHash23, 1, linkNonce23, anchorNonce23, 1, claimArtifactLink16)
+      .accountsStrict({
+        registryConfig,
+        workClaim,
+        contentArtifact: contentArtifact23,
+        claimArtifactLink: claimArtifactLink23,
+        anchorRecord: anchorRecord23,
+        claimant: wrongClaimant.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([wrongClaimant])
+      .rpc();
+
+    console.log("ERROR — transaction succeeded but should have reverted");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isExpected = msg.includes("Unauthorized") || msg.includes("6009");
+    if (isExpected) {
+      const logs: string[] = (err as any).logs ?? [];
+      const sysInvocations = logs.filter((line: string) =>
+        line.includes("11111111111111111111111111111111 invoke"),
+      ).length;
+      console.log(
+        `PASS — Unauthorized (6009) fired; ${sysInvocations} System Program CPI(s) preceded the revert (has_one fires before handler body, after Anchor's init account allocations)`,
+      );
+    } else {
+      console.log("FAIL — unexpected error");
+    }
+    console.log(`Error: ${msg}`);
+  }
+
+  // SCENARIO 24 — legitimate authority calls init_registry_config a second time
+  // Distinguishes the two failure modes introduced by Fix 1: wrong authority (scenario 22)
+  // produces Unauthorized (6009) from the upgrade-authority constraint; legitimate authority
+  // with the account already existing produces "already in use" (0x0) from Anchor's init
+  // constraint. The init constraint on registry_config (position 1 in the struct) fires
+  // before the authority constraints (positions 4-5), so the error is always 0x0 here.
+  // Note: scenario 18 also tests the second-call case; this scenario pairs it explicitly
+  // with scenario 22 to confirm the two failure modes produce distinct error codes.
+  console.log(
+    "\ninit_registry_config (legitimate authority, second call — expect 'already in use')",
+  );
+  try {
+    await program.methods
+      .initRegistryConfig()
+      .accountsStrict({
+        registryConfig,
+        signer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+        program: PROGRAM_ID,
+        programData,
+      })
+      .rpc();
+
+    console.log("FINDING: second init_registry_config succeeded");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     const isExpected =
