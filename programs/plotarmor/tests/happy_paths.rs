@@ -244,7 +244,7 @@ fn add_version_happy_path() {
             content_artifact,
             claim_artifact_link,
             anchor_record,
-            signer: context.authority.pubkey(),
+            claimant: context.authority.pubkey(),
             system_program: system_program::ID,
         }
         .to_account_metas(None),
@@ -572,7 +572,7 @@ fn build_register_claim(
 }
 
 fn build_add_version(
-    signer: &Keypair,
+    claimant: &Keypair,
     registry_config: Pubkey,
     work_claim: Pubkey,
     raw_hash: [u8; 32],
@@ -618,7 +618,7 @@ fn build_add_version(
             content_artifact,
             claim_artifact_link,
             anchor_record,
-            signer: signer.pubkey(),
+            claimant: claimant.pubkey(),
             system_program: system_program::ID,
         }
         .to_account_metas(None),

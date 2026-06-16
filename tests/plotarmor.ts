@@ -174,7 +174,7 @@ describe("PlotArmor", () => {
         contentArtifact,
         claimArtifactLink,
         anchorRecord,
-        signer: signer.publicKey,
+        claimant: signer.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .signers(opts.signer ? [opts.signer] : [])
@@ -539,7 +539,7 @@ describe("PlotArmor", () => {
             contentArtifact,
             claimArtifactLink,
             anchorRecord,
-            signer: payer.publicKey,
+            claimant: payer.publicKey,
             systemProgram: SystemProgram.programId,
           })
           .rpc();
@@ -567,7 +567,7 @@ describe("PlotArmor", () => {
             contentArtifact,
             claimArtifactLink,
             anchorRecord,
-            signer: payer.publicKey,
+            claimant: payer.publicKey,
             systemProgram: SystemProgram.programId,
           })
           .instruction();
@@ -610,7 +610,7 @@ describe("PlotArmor", () => {
             contentArtifact,
             claimArtifactLink,
             anchorRecord,
-            signer: attacker.publicKey,
+            claimant: attacker.publicKey,
             systemProgram: SystemProgram.programId,
           })
           .signers([attacker])

@@ -23,6 +23,7 @@ pub struct AddVersion<'info> {
 
     #[account(
         mut,
+        has_one = claimant @ PlotArmorError::Unauthorized,
         seeds = [b"claim", work_claim.root_artifact.as_ref(), work_claim.claimant.as_ref()],
         bump,
     )]
@@ -30,7 +31,7 @@ pub struct AddVersion<'info> {
 
     #[account(
         init_if_needed,
-        payer = signer,
+        payer = claimant,
         space = ContentArtifact::LEN,
         seeds = [b"content", raw_hash.as_ref()],
         bump,
@@ -39,7 +40,7 @@ pub struct AddVersion<'info> {
 
     #[account(
         init,
-        payer = signer,
+        payer = claimant,
         space = ClaimArtifactLink::LEN,
         seeds = [b"claim_artifact", work_claim.key().as_ref(), link_nonce.as_ref()],
         bump,
@@ -48,7 +49,7 @@ pub struct AddVersion<'info> {
 
     #[account(
         init,
-        payer = signer,
+        payer = claimant,
         space = AnchorRecord::LEN,
         seeds = [b"anchor", content_artifact.key().as_ref(), anchor_nonce.as_ref()],
         bump,
@@ -56,7 +57,7 @@ pub struct AddVersion<'info> {
     pub anchor_record: Account<'info, AnchorRecord>,
 
     #[account(mut)]
-    pub signer: Signer<'info>,
+    pub claimant: Signer<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -75,12 +76,6 @@ pub fn handler(
 
     // 2. Reject if paused.
     require!(!ctx.accounts.registry_config.paused, PlotArmorError::Paused);
-
-    // 3. Signer must be the registered claimant.
-    require!(
-        ctx.accounts.signer.key() == ctx.accounts.work_claim.claimant,
-        PlotArmorError::Unauthorized
-    );
 
     // Superseded claim chains are frozen — invariant C.4.
     require!(

@@ -257,7 +257,7 @@ fn build_register_claim_custom(
 // Mirrors the build_add_version helper in happy_paths: derives the version
 // accounts and returns the AddVersion instruction ready to send.
 fn build_add_version(
-    signer: &Keypair,
+    claimant: &Keypair,
     registry_config: Pubkey,
     work_claim: Pubkey,
     raw_hash: [u8; 32],
@@ -296,7 +296,7 @@ fn build_add_version(
             content_artifact,
             claim_artifact_link,
             anchor_record,
-            signer: signer.pubkey(),
+            claimant: claimant.pubkey(),
             system_program: system_program::ID,
         }
         .to_account_metas(None),
@@ -360,7 +360,7 @@ fn wrong_claimant_cannot_add_version() {
             content_artifact,
             claim_artifact_link,
             anchor_record,
-            signer: attacker.pubkey(),
+            claimant: attacker.pubkey(),
             system_program: system_program::ID,
         }
         .to_account_metas(None),

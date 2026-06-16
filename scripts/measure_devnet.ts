@@ -180,6 +180,11 @@ async function main(): Promise<void> {
   console.log(`Payer/authority: ${payer.publicKey.toBase58()}`);
 
   const registryConfig = derive([Buffer.from("config")]);
+  const BPF_UPGRADEABLE_LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
+  const programData = PublicKey.findProgramAddressSync(
+    [PROGRAM_ID.toBytes()],
+    BPF_UPGRADEABLE_LOADER,
+  )[0];
 
   const rawHash1 = randomHash();
   const linkNonce1 = randomHash();
@@ -221,6 +226,8 @@ async function main(): Promise<void> {
         registryConfig,
         signer: payer.publicKey,
         systemProgram: SystemProgram.programId,
+        program: PROGRAM_ID,
+        programData,
       })
       .rpc();
 
@@ -316,7 +323,7 @@ async function main(): Promise<void> {
       contentArtifact: contentArtifact2,
       claimArtifactLink: claimArtifactLink2,
       anchorRecord: versionAnchorRecord,
-      signer: payer.publicKey,
+      claimant: payer.publicKey,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
@@ -485,7 +492,7 @@ async function main(): Promise<void> {
         contentArtifact: contentArtifact3,
         claimArtifactLink: claimArtifactLink3,
         anchorRecord: anchorRecord3,
-        signer: payer.publicKey,
+        claimant: payer.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
@@ -565,9 +572,9 @@ async function main(): Promise<void> {
 
   // SCENARIO 5 — wrong claimant cannot add_version (expect Unauthorized 6009)
   // Fund wrongClaimant from payer instead of airdrop; Helius devnet RPC does not proxy the faucet.
-  // wrongClaimant needs lamports for the init accounts (claim_artifact_link, anchor_record) because
-  // Anchor's init constraints run before the handler body Unauthorized check. The lamports are
-  // returned when the transaction reverts atomically on Unauthorized.
+  // wrongClaimant is funded in case it is used as payer for any init accounts.
+  // The has_one = claimant constraint on work_claim fires before init, so the transaction
+  // reverts before any accounts are created.
   const wrongClaimant = Keypair.generate();
   const fundTx5 = new Transaction().add(
     SystemProgram.transfer({
@@ -607,7 +614,7 @@ async function main(): Promise<void> {
         contentArtifact: contentArtifact5,
         claimArtifactLink: claimArtifactLink5,
         anchorRecord: anchorRecord5,
-        signer: wrongClaimant.publicKey,
+        claimant: wrongClaimant.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .signers([wrongClaimant])
@@ -855,7 +862,7 @@ async function main(): Promise<void> {
       contentArtifact: contentArtifact11a,
       claimArtifactLink: claimArtifactLink11a,
       anchorRecord: anchorRecord11a,
-      signer: payer.publicKey,
+      claimant: payer.publicKey,
       systemProgram: SystemProgram.programId,
     })
     .instruction();
@@ -868,7 +875,7 @@ async function main(): Promise<void> {
       contentArtifact: contentArtifact11b,
       claimArtifactLink: claimArtifactLink11b,
       anchorRecord: anchorRecord11b,
-      signer: payer.publicKey,
+      claimant: payer.publicKey,
       systemProgram: SystemProgram.programId,
     })
     .instruction();
@@ -1173,7 +1180,7 @@ async function main(): Promise<void> {
         contentArtifact: contentArtifact1,
         claimArtifactLink: claimArtifactLink16,
         anchorRecord: anchorRecord16,
-        signer: payer.publicKey,
+        claimant: payer.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
@@ -1246,6 +1253,8 @@ async function main(): Promise<void> {
         registryConfig,
         signer: payer.publicKey,
         systemProgram: SystemProgram.programId,
+        program: PROGRAM_ID,
+        programData,
       })
       .rpc();
 
@@ -1264,9 +1273,9 @@ async function main(): Promise<void> {
 
   // SCENARIO 19 — cross-claim: attacker calls add_version on workClaim (payer's)
   // workClaim.claimant == payer.publicKey. An unrelated signer triggers
-  // add_version.rs:80 require!(signer == claimant) -> Unauthorized (6009).
-  // The three init accounts (contentArtifact, claimArtifactLink, anchorRecord) run first;
-  // attacker needs lamports to fund them temporarily (all returned on revert).
+  // the has_one = claimant constraint on work_claim -> Unauthorized (6009).
+  // The constraint fires before init, so no accounts are created before the revert.
+  // attacker is funded as payer in case it is needed for other scenarios.
   // claimArtifactLink16 is the correct current head after scenario 16 succeeded.
   const attacker19 = Keypair.generate();
   const fundTx19 = new Transaction().add(
@@ -1316,7 +1325,7 @@ async function main(): Promise<void> {
         contentArtifact: contentArtifact19,
         claimArtifactLink: claimArtifactLink19,
         anchorRecord: anchorRecord19,
-        signer: attacker19.publicKey,
+        claimant: attacker19.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .signers([attacker19])

@@ -1870,9 +1870,12 @@ name = "plotarmor"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "bincode",
  "litesvm",
  "solana-keypair",
+ "solana-loader-v3-interface",
  "solana-message",
+ "solana-sdk-ids",
  "solana-signer",
  "solana-transaction",
 ]
