@@ -228,10 +228,11 @@ A. anchor_authorized_contract uses single-admin authorization, not threshold gov
    solo-creator case studies. Full threshold governance requires the custody-model decision
    (Decision 5, pending Sali Law Group) before implementation.
 
-B. init_registry_config is unauthenticated — any caller seizes authority on first call.
-   The [b"config"] PDA can only be initialized once, so whoever calls it first becomes the
-   protocol authority. Safe on devnet (controlled deploy), but must be fixed before mainnet
-   by constraining the initializer to the program upgrade authority. Not a case-study blocker.
+B. init_registry_config upgrade-authority constraint — FIXED. The instruction now requires
+   two additional accounts: program (the program account itself) and program_data (the BPF
+   upgradeable loader ProgramData PDA). Two constraints enforce: (1) program_data is the
+   legitimate ProgramData for this program, and (2) the signer is the upgrade authority
+   recorded in program_data. Error: Unauthorized(6009). Fixed in commit after 800fa99.
 
 C. No pause or config-update instruction exists. The paused field and enabled_anchor_modes
    bitfield in RegistryConfig have no setter. The kill switch is intentionally deferred to

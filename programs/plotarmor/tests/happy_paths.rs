@@ -29,8 +29,13 @@ fn initialize_registry(
     svm: &mut litesvm::LiteSVM,
     authority: &Keypair,
 ) -> Pubkey {
+    use solana_sdk_ids::bpf_loader_upgradeable;
     let registry_config =
         Pubkey::find_program_address(&[b"config"], &plotarmor::ID).0;
+    let program_data = Pubkey::find_program_address(
+        &[plotarmor::ID.as_ref()],
+        &bpf_loader_upgradeable::id(),
+    ).0;
 
     let instruction = Instruction::new_with_bytes(
         plotarmor::ID,
@@ -39,6 +44,8 @@ fn initialize_registry(
             registry_config,
             signer: authority.pubkey(),
             system_program: system_program::ID,
+            program: plotarmor::ID,
+            program_data,
         }
         .to_account_metas(None),
     );

@@ -6,7 +6,9 @@ use {
     },
     litesvm::LiteSVM,
     solana_keypair::Keypair,
+    solana_loader_v3_interface::state::UpgradeableLoaderState,
     solana_message::{Message, VersionedMessage},
+    solana_sdk_ids::bpf_loader_upgradeable,
     solana_signer::Signer,
     solana_transaction::versioned::VersionedTransaction,
 };
@@ -29,6 +31,29 @@ pub fn setup() -> TestContext {
         include_bytes!("../../../../target/deploy/plotarmor.so");
 
     svm.add_program(plotarmor::ID, program_bytes).unwrap();
+
+    // LiteSVM sets upgrade_authority_address = None by default.
+    // Patch it so init_registry_config's upgrade-authority constraint passes.
+    let programdata_address = Pubkey::find_program_address(
+        &[plotarmor::ID.as_ref()],
+        &bpf_loader_upgradeable::id(),
+    ).0;
+    let mut pd_account = svm.get_account(&programdata_address).unwrap();
+    let metadata_len = UpgradeableLoaderState::size_of_programdata_metadata();
+    let existing: UpgradeableLoaderState =
+        bincode::deserialize(&pd_account.data[..metadata_len]).unwrap();
+    let slot = match existing {
+        UpgradeableLoaderState::ProgramData { slot, .. } => slot,
+        _ => 0,
+    };
+    let new_header = UpgradeableLoaderState::ProgramData {
+        slot,
+        upgrade_authority_address: Some(authority.pubkey()),
+    };
+    let header_bytes = bincode::serialize(&new_header).unwrap();
+    pd_account.data[..metadata_len].copy_from_slice(&header_bytes);
+    svm.set_account(programdata_address, pd_account).unwrap();
+
     svm.airdrop(&payer.pubkey(), TEST_KEYPAIR_LAMPORTS).unwrap();
     svm.airdrop(&authority.pubkey(), TEST_KEYPAIR_LAMPORTS)
         .unwrap();

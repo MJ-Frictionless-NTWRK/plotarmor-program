@@ -53,6 +53,11 @@ describe("PlotArmor", () => {
   const program = anchor.workspace.Plotarmor as Program<Plotarmor>;
   const payer = (provider.wallet as anchor.Wallet).payer;
   const registryConfig = derive([Buffer.from("config")]);
+  const BPF_UPGRADEABLE_LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
+  const programData = PublicKey.findProgramAddressSync(
+    [PROGRAM_ID.toBytes()],
+    BPF_UPGRADEABLE_LOADER
+  )[0];
 
   // Fund an ephemeral keypair from the payer.
   async function fund(kp: Keypair, lamports = 10_000_000): Promise<void> {
@@ -186,6 +191,8 @@ describe("PlotArmor", () => {
         registryConfig,
         signer: payer.publicKey,
         systemProgram: SystemProgram.programId,
+        program: PROGRAM_ID,
+        programData,
       })
       .rpc();
   });
@@ -968,6 +975,8 @@ describe("PlotArmor", () => {
             registryConfig,
             signer: payer.publicKey,
             systemProgram: SystemProgram.programId,
+            program: PROGRAM_ID,
+            programData,
           })
           .rpc();
         expect.fail("should have thrown");
