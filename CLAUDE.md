@@ -298,7 +298,7 @@ devnet scenario coverage (scripts/measure_devnet.ts, 21 scenarios, all pass):
   registry config replay, cross-claim add_version, cross-claim authorized contract,
   AuthorizedContractAnchor PDA collision. All pass; harness exits non-zero on any failure.
 
-Auditor brief: AUDITOR_BRIEF.md in the repo root covers test coverage, invariants, error codes, known limitations A-E, and audit focus areas. Commit: 800fa99.
+Auditor brief: AUDITOR_BRIEF.md in the repo root covers test coverage, invariants, error codes, known limitations A-E, and audit focus areas. Commit: cb61f79.
 1. Rights Index ingestion: Supabase Edge Function listens for Solana events and writes to the database.
    No separate indexer service. Use a clean repository abstraction layer in the query code so the
    database can be swapped later without touching the rest of the codebase.
