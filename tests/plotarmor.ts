@@ -43,6 +43,7 @@ interface ClaimFixture {
   claimArtifactLink: PublicKey;
   anchorRecord: PublicKey;
   linkNonce: Buffer;
+  externalRefHash: Buffer;
 }
 
 // ─── Suite ────────────────────────────────────────────────────────────────────
@@ -81,6 +82,7 @@ describe("PlotArmor", () => {
     const rawHash = opts.rawHash ?? rh();
     const linkNonce = rh();
     const anchorNonce = rh();
+    const externalRefHash = rh();
     const contentArtifact = derive([Buffer.from("content"), rawHash]);
     const workClaim = derive([
       Buffer.from("claim"),
@@ -105,7 +107,7 @@ describe("PlotArmor", () => {
     ]);
 
     await program.methods
-      .registerWorkClaim(ba(rawHash), 1, 1, 100, 100, ba(linkNonce), ba(anchorNonce), 1)
+      .registerWorkClaim(ba(rawHash), 1, 1, 100, 100, ba(linkNonce), ba(anchorNonce), 1, ba(externalRefHash))
       .accountsStrict({
         registryConfig,
         contentArtifact,
@@ -129,6 +131,7 @@ describe("PlotArmor", () => {
       claimArtifactLink,
       anchorRecord,
       linkNonce,
+      externalRefHash,
     };
   }
 
@@ -254,12 +257,10 @@ describe("PlotArmor", () => {
       expect(link.previousLink.toBase58()).to.equal(PublicKey.default.toBase58());
       expect(link.contentArtifact.toBase58()).to.equal(f.contentArtifact.toBase58());
       expect(link.workClaim.toBase58()).to.equal(f.workClaim.toBase58());
-
-      // AnchorRecord anchors the WorkClaim registration
       expect(ar.anchoredObject.toBase58()).to.equal(f.workClaim.toBase58());
       expect(ar.anchoredObjectKind).to.equal(0); // WorkClaim
       expect(ar.anchorMode).to.equal(1);
-      expect(Buffer.from(ar.externalRefHash)).to.deep.equal(Buffer.alloc(32));
+      expect(Buffer.from(ar.externalRefHash)).to.deep.equal(f.externalRefHash);
     });
 
     it("latest_link.content_artifact == latest_artifact invariant holds at registration", async () => {
@@ -670,7 +671,7 @@ describe("PlotArmor", () => {
       const anchorRecord      = derive([Buffer.from("anchor"), workClaim.toBuffer(), anchorNonce]);
       try {
         await program.methods
-          .registerWorkClaim(ba(rawHash), 99, 1, 100, 100, ba(linkNonce), ba(anchorNonce), 1)
+          .registerWorkClaim(ba(rawHash), 99, 1, 100, 100, ba(linkNonce), ba(anchorNonce), 1, ba(rh()))
           .accountsStrict({ registryConfig, contentArtifact, workClaim, ownership, ownerRecord, claimArtifactLink, anchorRecord, signer: payer.publicKey, systemProgram: SystemProgram.programId })
           .rpc();
         expect.fail("should have thrown");
@@ -689,7 +690,7 @@ describe("PlotArmor", () => {
       const anchorRecord      = derive([Buffer.from("anchor"), workClaim.toBuffer(), anchorNonce]);
       try {
         await program.methods
-          .registerWorkClaim(ba(rawHash), 1, 99, 100, 100, ba(linkNonce), ba(anchorNonce), 1)
+          .registerWorkClaim(ba(rawHash), 1, 99, 100, 100, ba(linkNonce), ba(anchorNonce), 1, ba(rh()))
           .accountsStrict({ registryConfig, contentArtifact, workClaim, ownership, ownerRecord, claimArtifactLink, anchorRecord, signer: payer.publicKey, systemProgram: SystemProgram.programId })
           .rpc();
         expect.fail("should have thrown");
@@ -708,7 +709,7 @@ describe("PlotArmor", () => {
       const anchorRecord      = derive([Buffer.from("anchor"), workClaim.toBuffer(), anchorNonce]);
       try {
         await program.methods
-          .registerWorkClaim(ba(rawHash), 255, 1, 100, 100, ba(linkNonce), ba(anchorNonce), 1)
+          .registerWorkClaim(ba(rawHash), 255, 1, 100, 100, ba(linkNonce), ba(anchorNonce), 1, ba(rh()))
           .accountsStrict({ registryConfig, contentArtifact, workClaim, ownership, ownerRecord, claimArtifactLink, anchorRecord, signer: payer.publicKey, systemProgram: SystemProgram.programId })
           .rpc();
         expect.fail("should have thrown");
@@ -729,7 +730,7 @@ describe("PlotArmor", () => {
       const anchorRecord      = derive([Buffer.from("anchor"), workClaim.toBuffer(), anchorNonce]);
       try {
         await program.methods
-          .registerWorkClaim(ba(rawHash), 1, 1, 0, 0, ba(linkNonce), ba(anchorNonce), 1)
+          .registerWorkClaim(ba(rawHash), 1, 1, 0, 0, ba(linkNonce), ba(anchorNonce), 1, ba(rh()))
           .accountsStrict({ registryConfig, contentArtifact, workClaim, ownership, ownerRecord, claimArtifactLink, anchorRecord, signer: payer.publicKey, systemProgram: SystemProgram.programId })
           .rpc();
         expect.fail("should have thrown");
@@ -749,7 +750,7 @@ describe("PlotArmor", () => {
       try {
         // total=50, threshold=100: threshold > total
         await program.methods
-          .registerWorkClaim(ba(rawHash), 1, 1, 50, 100, ba(linkNonce), ba(anchorNonce), 1)
+          .registerWorkClaim(ba(rawHash), 1, 1, 50, 100, ba(linkNonce), ba(anchorNonce), 1, ba(rh()))
           .accountsStrict({ registryConfig, contentArtifact, workClaim, ownership, ownerRecord, claimArtifactLink, anchorRecord, signer: payer.publicKey, systemProgram: SystemProgram.programId })
           .rpc();
         expect.fail("should have thrown");
