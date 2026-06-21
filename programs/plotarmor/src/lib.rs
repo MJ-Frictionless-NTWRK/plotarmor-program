@@ -70,6 +70,7 @@ pub mod plotarmor {
         anchor_nonce: [u8; 32],
         anchor_mode_arg: u8,
         asserted_work_claim: Pubkey,
+        external_ref_hash: [u8; 32],
     ) -> Result<()> {
         instructions::anchor_evidence_contract::handler(
             ctx,
@@ -78,6 +79,7 @@ pub mod plotarmor {
             anchor_nonce,
             anchor_mode_arg,
             asserted_work_claim,
+            external_ref_hash,
         )
     }
 

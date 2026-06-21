@@ -709,6 +709,7 @@ fn invalid_contract_kind_rejected() {
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
             asserted_work_claim: Pubkey::default(),
+            external_ref_hash: [11u8; 32],
         }
         .data(),
         plotarmor::accounts::AnchorEvidenceContract {

@@ -365,6 +365,7 @@ fn anchor_evidence_contract_happy_path() {
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
             asserted_work_claim,
+            external_ref_hash: [10u8; 32],
         }
         .data(),
         plotarmor::accounts::AnchorEvidenceContract {

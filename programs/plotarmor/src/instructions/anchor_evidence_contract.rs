@@ -60,6 +60,7 @@ pub fn handler(
     _anchor_nonce: [u8; 32],
     anchor_mode_arg: u8,
     asserted_work_claim: Pubkey,
+    external_ref_hash: [u8; 32],
 ) -> Result<()> {
     // 1. Validate anchor mode before any state changes.
     assert_mode_allowed(anchor_mode_arg, &ctx.accounts.registry_config)?;
@@ -98,7 +99,7 @@ pub fn handler(
     ctx.accounts.anchor_record.anchored_object_kind = AnchoredObjectKind::EvidenceAnchor as u8;
     ctx.accounts.anchor_record.anchor_mode = anchor_mode_arg;
     ctx.accounts.anchor_record.created_at = now;
-    ctx.accounts.anchor_record.external_ref_hash = [0u8; 32];
+    ctx.accounts.anchor_record.external_ref_hash = external_ref_hash;
 
     Ok(())
 }

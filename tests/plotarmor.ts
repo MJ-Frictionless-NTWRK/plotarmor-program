@@ -376,7 +376,7 @@ describe("PlotArmor", () => {
 
       // args: rawContractHash, contractKind, anchorNonce, anchorModeArg, assertedWorkClaim
       await program.methods
-        .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, f.workClaim)
+        .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, f.workClaim, ba(rh()))
         .accountsStrict({
           registryConfig,
           contractArtifact,
@@ -416,7 +416,7 @@ describe("PlotArmor", () => {
       ]);
 
       await program.methods
-        .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, PublicKey.default)
+        .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, PublicKey.default, ba(rh()))
         .accountsStrict({
           registryConfig,
           contractArtifact,
@@ -883,7 +883,7 @@ describe("PlotArmor", () => {
       ]);
 
       await program.methods
-        .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, f.workClaim)
+        .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, f.workClaim, ba(rh()))
         .accountsStrict({
           registryConfig,
           contractArtifact,
@@ -896,7 +896,7 @@ describe("PlotArmor", () => {
 
       try {
         await program.methods
-          .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, f.workClaim)
+          .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, f.workClaim, ba(rh()))
           .accountsStrict({
             registryConfig,
             contractArtifact,
