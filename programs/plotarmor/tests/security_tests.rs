@@ -93,6 +93,7 @@ fn build_register_claim(
             link_nonce,
             anchor_nonce,
             anchor_mode_arg,
+            external_ref_hash: [66u8; 32],
         }
         .data(),
         plotarmor::accounts::RegisterWorkClaim {
@@ -228,6 +229,7 @@ fn build_register_claim_custom(
             link_nonce,
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
+            external_ref_hash: [99u8; 32],
         }
         .data(),
         plotarmor::accounts::RegisterWorkClaim {
@@ -889,7 +891,7 @@ fn anchor_record_fields_locked() {
     assert_eq!(anchor_record.anchored_object, fixture.work_claim);
     assert_eq!(anchor_record.anchored_object_kind, 0);
     assert_eq!(anchor_record.anchor_mode, ANCHOR_MODE);
-    assert_eq!(anchor_record.external_ref_hash, [0u8; 32]);
+    assert_eq!(anchor_record.external_ref_hash, [66u8; 32]);
 }
 
 #[test]

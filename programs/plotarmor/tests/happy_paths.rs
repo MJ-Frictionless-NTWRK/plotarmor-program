@@ -112,6 +112,7 @@ fn register_claim(
             link_nonce,
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
+            external_ref_hash: [88u8; 32],
         }
         .data(),
         plotarmor::accounts::RegisterWorkClaim {
@@ -542,6 +543,7 @@ fn build_register_claim(
             link_nonce,
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
+            external_ref_hash: [77u8; 32],
         }
         .data(),
         plotarmor::accounts::RegisterWorkClaim {

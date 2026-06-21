@@ -111,6 +111,7 @@ pub mod plotarmor {
         link_nonce: [u8; 32],
         anchor_nonce: [u8; 32],
         anchor_mode_arg: u8,
+        external_ref_hash: [u8; 32],
     ) -> Result<()> {
         instructions::register_work_claim::handler(
             ctx,
@@ -122,6 +123,7 @@ pub mod plotarmor {
             link_nonce,
             anchor_nonce,
             anchor_mode_arg,
+            external_ref_hash,
         )
     }
 }
