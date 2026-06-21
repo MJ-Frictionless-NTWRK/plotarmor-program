@@ -439,6 +439,7 @@ fn anchor_authorized_contract_happy_path() {
             contract_kind: 1,
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
+            external_ref_hash: [9u8; 32],
         }
         .data(),
         plotarmor::accounts::AnchorAuthorizedContract {

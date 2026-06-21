@@ -72,6 +72,7 @@ pub fn handler(
     contract_kind: u8,
     _anchor_nonce: [u8; 32],
     anchor_mode_arg: u8,
+    external_ref_hash: [u8; 32],
 ) -> Result<()> {
     // 1. Validate anchor mode before any state changes.
     assert_mode_allowed(anchor_mode_arg, &ctx.accounts.registry_config)?;
@@ -118,7 +119,7 @@ pub fn handler(
         AnchoredObjectKind::AuthorizedContractAnchor as u8;
     ctx.accounts.anchor_record.anchor_mode = anchor_mode_arg;
     ctx.accounts.anchor_record.created_at = now;
-    ctx.accounts.anchor_record.external_ref_hash = [0u8; 32];
+    ctx.accounts.anchor_record.external_ref_hash = external_ref_hash;
 
     Ok(())
 }

@@ -451,7 +451,7 @@ describe("PlotArmor", () => {
 
       // args: rawContractHash, contractKind, anchorNonce, anchorModeArg
       await program.methods
-        .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce), 1)
+        .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce), 1, ba(rh()))
         .accountsStrict({
           registryConfig,
           workClaim: f.workClaim,
@@ -640,7 +640,7 @@ describe("PlotArmor", () => {
       ]);
       try {
         await program.methods
-          .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce), 1)
+          .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce), 1, ba(rh()))
           .accountsStrict({
             registryConfig,
             workClaim: f.workClaim,
@@ -929,7 +929,7 @@ describe("PlotArmor", () => {
       ]);
 
       await program.methods
-        .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce), 1)
+        .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce), 1, ba(rh()))
         .accountsStrict({
           registryConfig,
           workClaim: f2.workClaim,
@@ -950,7 +950,7 @@ describe("PlotArmor", () => {
           anchorNonce2,
         ]);
         await program.methods
-          .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce2), 1)
+          .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce2), 1, ba(rh()))
           .accountsStrict({
             registryConfig,
             workClaim: f2.workClaim,

@@ -53,6 +53,7 @@ pub mod plotarmor {
         contract_kind: u8,
         anchor_nonce: [u8; 32],
         anchor_mode_arg: u8,
+        external_ref_hash: [u8; 32],
     ) -> Result<()> {
         instructions::anchor_authorized_contract::handler(
             ctx,
@@ -60,6 +61,7 @@ pub mod plotarmor {
             contract_kind,
             anchor_nonce,
             anchor_mode_arg,
+            external_ref_hash,
         )
     }
 
