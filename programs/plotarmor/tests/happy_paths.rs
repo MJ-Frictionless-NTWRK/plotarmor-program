@@ -237,6 +237,7 @@ fn add_version_happy_path() {
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
             expected_previous_link: fixture.claim_artifact_link,
+            external_ref_hash: [55u8; 32],
         }
         .data(),
         plotarmor::accounts::AddVersion {
@@ -612,6 +613,7 @@ fn build_add_version(
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
             expected_previous_link,
+            external_ref_hash: [44u8; 32],
         }
         .data(),
         plotarmor::accounts::AddVersion {

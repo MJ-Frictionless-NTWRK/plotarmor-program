@@ -89,6 +89,7 @@ pub mod plotarmor {
         anchor_nonce: [u8; 32],
         anchor_mode_arg: u8,
         expected_previous_link: Pubkey,
+        external_ref_hash: [u8; 32],
     ) -> Result<()> {
         instructions::add_version::handler(
             ctx,
@@ -98,6 +99,7 @@ pub mod plotarmor {
             anchor_nonce,
             anchor_mode_arg,
             expected_previous_link,
+            external_ref_hash,
         )
     }
 

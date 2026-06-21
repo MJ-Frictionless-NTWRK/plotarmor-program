@@ -170,7 +170,7 @@ describe("PlotArmor", () => {
     ]);
 
     await program.methods
-      .addVersion(ba(rawHash), 1, ba(linkNonce), ba(anchorNonce), 1, expectedPreviousLink)
+      .addVersion(ba(rawHash), 1, ba(linkNonce), ba(anchorNonce), 1, expectedPreviousLink, ba(rh()))
       .accountsStrict({
         registryConfig,
         workClaim,
@@ -533,7 +533,7 @@ describe("PlotArmor", () => {
       const anchorRecord      = derive([Buffer.from("anchor"), contentArtifact.toBuffer(), anchorNonce]);
       try {
         await program.methods
-          .addVersion(ba(hash), 1, ba(linkNonce), ba(anchorNonce), 1, staleLink)
+          .addVersion(ba(hash), 1, ba(linkNonce), ba(anchorNonce), 1, staleLink, ba(rh()))
           .accountsStrict({
             registryConfig,
             workClaim: f.workClaim,
@@ -561,7 +561,7 @@ describe("PlotArmor", () => {
         const claimArtifactLink = derive([Buffer.from("claim_artifact"), f2.workClaim.toBuffer(), linkNonce]);
         const anchorRecord      = derive([Buffer.from("anchor"), contentArtifact.toBuffer(), anchorNonce]);
         return program.methods
-          .addVersion(ba(hash), 1, ba(linkNonce), ba(anchorNonce), 1, expectedPrev)
+          .addVersion(ba(hash), 1, ba(linkNonce), ba(anchorNonce), 1, expectedPrev, ba(rh()))
           .accountsStrict({
             registryConfig,
             workClaim: f2.workClaim,
@@ -604,7 +604,7 @@ describe("PlotArmor", () => {
       const anchorRecord      = derive([Buffer.from("anchor"), contentArtifact.toBuffer(), anchorNonce]);
       try {
         await program.methods
-          .addVersion(ba(hash), 1, ba(linkNonce), ba(anchorNonce), 1, f.claimArtifactLink)
+          .addVersion(ba(hash), 1, ba(linkNonce), ba(anchorNonce), 1, f.claimArtifactLink, ba(rh()))
           .accountsStrict({
             registryConfig,
             workClaim: f.workClaim,

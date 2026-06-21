@@ -290,6 +290,7 @@ fn build_add_version(
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
             expected_previous_link,
+            external_ref_hash: [33u8; 32],
         }
         .data(),
         plotarmor::accounts::AddVersion {
@@ -354,6 +355,7 @@ fn wrong_claimant_cannot_add_version() {
             anchor_nonce,
             anchor_mode_arg: ANCHOR_MODE,
             expected_previous_link: fixture.claim_artifact_link,
+            external_ref_hash: [22u8; 32],
         }
         .data(),
         plotarmor::accounts::AddVersion {
