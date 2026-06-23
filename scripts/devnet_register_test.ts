@@ -122,6 +122,7 @@ async function main() {
   const rawHash = rh();
   const linkNonce = rh();
   const anchorNonce = rh();
+  const externalRefHash = rh();
 
   const contentArtifact = derive([Buffer.from("content"), rawHash]);
   const workClaim = derive([
@@ -172,7 +173,8 @@ async function main() {
         100, // threshold_shares
         ba(linkNonce),
         ba(anchorNonce),
-        1    // anchor_mode_arg: attested_devnet
+        1,   // anchor_mode_arg: attested_devnet
+        ba(externalRefHash)
       )
       .accountsStrict({
         registryConfig,
@@ -204,6 +206,10 @@ async function main() {
     console.log("✓ AnchorRecord fetched from chain:");
     console.log("    anchor_mode:  ", anchorRecordAccount.anchorMode);
     console.log("    anchored_object_kind:", anchorRecordAccount.anchoredObjectKind);
+    const storedHash = Buffer.from(anchorRecordAccount.externalRefHash).toString("hex");
+    const matchesExpected = storedHash === externalRefHash.toString("hex");
+    console.log("    external_ref_hash (on-chain):", storedHash);
+    console.log("    matches submitted value:     ", matchesExpected ? "✓ YES" : "✗ NO - MISMATCH");
 
     console.log("\n================================================");
     console.log("RESULT: Step A proof SUCCESSFUL");
@@ -216,6 +222,7 @@ async function main() {
       work_claim_pda: workClaim.toBase58(),
       anchor_record_pda: anchorRecord.toBase58(),
       anchor_mode: 1,
+      external_ref_hash: externalRefHash.toString("hex"),
       raw_hash: rawHash.toString("hex"),
     }, null, 2));
 
