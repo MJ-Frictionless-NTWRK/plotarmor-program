@@ -260,6 +260,7 @@ async function main(): Promise<void> {
       linkNonce1,
       anchorNonce1,
       1,
+    Array(32).fill(0),
     )
     .accountsStrict({
       registryConfig,
@@ -316,6 +317,7 @@ async function main(): Promise<void> {
       anchorNonce2,
       1,
       claimArtifactLink1,
+        Array(32).fill(0),
     )
     .accountsStrict({
       registryConfig,
@@ -365,6 +367,7 @@ async function main(): Promise<void> {
       evidenceAnchorNonce,
       1,
       workClaim,
+      Array(32).fill(0),
     )
     .accountsStrict({
       registryConfig,
@@ -408,7 +411,7 @@ async function main(): Promise<void> {
   ]);
 
   const authorizedSignature = await program.methods
-    .anchorAuthorizedContract(rawContractHash2, 1, authNonce, 1)
+    .anchorAuthorizedContract(rawContractHash2, 1, authNonce, 1, Array(32).fill(0))
     .accountsStrict({
       registryConfig,
       workClaim,
@@ -485,7 +488,7 @@ async function main(): Promise<void> {
   console.log("\nadd_version (stale head — expect StaleLineageHead 6001)");
   try {
     await program.methods
-      .addVersion(rawHash3, 1, linkNonce3, anchorNonce3, 1, claimArtifactLink1)
+      .addVersion(rawHash3, 1, linkNonce3, anchorNonce3, 1, claimArtifactLink1, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         workClaim,
@@ -546,7 +549,7 @@ async function main(): Promise<void> {
   );
   try {
     await program.methods
-      .registerWorkClaim(rawHash4, 99, 1, 100, 100, linkNonce4, anchorNonce4, 1)
+      .registerWorkClaim(rawHash4, 99, 1, 100, 100, linkNonce4, anchorNonce4, 1, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         contentArtifact: contentArtifact4,
@@ -607,7 +610,7 @@ async function main(): Promise<void> {
   console.log("\nadd_version (wrong claimant — expect Unauthorized 6009)");
   try {
     await program.methods
-      .addVersion(rawHash5, 1, linkNonce5, anchorNonce5, 1, claimArtifactLink2)
+      .addVersion(rawHash5, 1, linkNonce5, anchorNonce5, 1, claimArtifactLink2, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         workClaim,
@@ -711,7 +714,7 @@ async function main(): Promise<void> {
   );
   try {
     await program.methods
-      .registerWorkClaim(rawHash9, 1, 1, 0, 0, linkNonce9, anchorNonce9, 1)
+      .registerWorkClaim(rawHash9, 1, 1, 0, 0, linkNonce9, anchorNonce9, 1, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         contentArtifact: contentArtifact9,
@@ -787,6 +790,7 @@ async function main(): Promise<void> {
         linkNonce10,
         anchorNonce10,
         1,
+        Array(32).fill(0),
       )
       .accountsStrict({
         registryConfig,
@@ -855,7 +859,7 @@ async function main(): Promise<void> {
   ]);
 
   const ix11a = await program.methods
-    .addVersion(rawHash11a, 1, linkNonce11a, anchorNonce11a, 1, claimArtifactLink2)
+    .addVersion(rawHash11a, 1, linkNonce11a, anchorNonce11a, 1, claimArtifactLink2, Array(32).fill(0))
     .accountsStrict({
       registryConfig,
       workClaim,
@@ -868,7 +872,7 @@ async function main(): Promise<void> {
     .instruction();
 
   const ix11b = await program.methods
-    .addVersion(rawHash11b, 1, linkNonce11b, anchorNonce11b, 1, claimArtifactLink2)
+    .addVersion(rawHash11b, 1, linkNonce11b, anchorNonce11b, 1, claimArtifactLink2, Array(32).fill(0))
     .accountsStrict({
       registryConfig,
       workClaim,
@@ -988,7 +992,7 @@ async function main(): Promise<void> {
   console.log("\nregister_work_claim A (rawHash13, payer as claimant — expect success)");
   try {
     await program.methods
-      .registerWorkClaim(rawHash13, 1, 1, 100, 100, linkNonce13a, anchorNonce13a, 1)
+      .registerWorkClaim(rawHash13, 1, 1, 100, 100, linkNonce13a, anchorNonce13a, 1, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         contentArtifact: contentArtifact13,
@@ -1048,7 +1052,7 @@ async function main(): Promise<void> {
   console.log("\nregister_work_claim B (same rawHash13, claimant2 — expect convergence/success)");
   try {
     await program.methods
-      .registerWorkClaim(rawHash13, 1, 1, 100, 100, linkNonce13b, anchorNonce13b, 1)
+      .registerWorkClaim(rawHash13, 1, 1, 100, 100, linkNonce13b, anchorNonce13b, 1, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         contentArtifact: contentArtifact13,
@@ -1173,7 +1177,7 @@ async function main(): Promise<void> {
   );
   try {
     await program.methods
-      .addVersion(rawHash1, 1, linkNonce16, anchorNonce16, 1, claimArtifactLink2)
+      .addVersion(rawHash1, 1, linkNonce16, anchorNonce16, 1, claimArtifactLink2, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         workClaim,
@@ -1216,6 +1220,7 @@ async function main(): Promise<void> {
         evidenceAnchorNonce,
         1,
         workClaim,
+        Array(32).fill(0),
       )
       .accountsStrict({
         registryConfig,
@@ -1319,6 +1324,7 @@ async function main(): Promise<void> {
         anchorNonce19,
         1,
         claimArtifactLink16,
+        Array(32).fill(0),
       )
       .accountsStrict({
         registryConfig,
@@ -1378,7 +1384,7 @@ async function main(): Promise<void> {
   );
   try {
     await program.methods
-      .anchorAuthorizedContract(rawContractHash20, 1, authNonce20, 1)
+      .anchorAuthorizedContract(rawContractHash20, 1, authNonce20, 1, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         workClaim,
@@ -1418,7 +1424,7 @@ async function main(): Promise<void> {
   );
   try {
     await program.methods
-      .anchorAuthorizedContract(rawContractHash2, 1, authNonce21, 1)
+      .anchorAuthorizedContract(rawContractHash2, 1, authNonce21, 1, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         workClaim,
@@ -1531,7 +1537,7 @@ async function main(): Promise<void> {
   );
   try {
     await program.methods
-      .addVersion(rawHash23, 1, linkNonce23, anchorNonce23, 1, claimArtifactLink16)
+      .addVersion(rawHash23, 1, linkNonce23, anchorNonce23, 1, claimArtifactLink16, Array(32).fill(0))
       .accountsStrict({
         registryConfig,
         workClaim,
