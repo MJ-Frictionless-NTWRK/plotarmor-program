@@ -22,9 +22,9 @@ This brief covers the PlotArmor Anchor program implementing the v1 instruction s
 
 **Test coverage — 57 tests total, all passing as of commit `cb61f79`:**
 
-Layer 1 (Rust/LiteSVM, 28 tests, `programs/plotarmor/tests/`):
+Layer 1 (Rust/LiteSVM, 34 tests, `programs/plotarmor/tests/`):
 - `happy_paths.rs`: 11 tests — all instructions, content-addressing convergence, chained versions, chain reuse, reserved-field enforcement
-- `security_tests.rs`: 17 tests — all error codes, atomicity, PDA collision, cross-claim rejections, enum boundary values
+- `security_tests.rs`: 22 tests — all error codes, atomicity, PDA collision, cross-claim rejections, enum boundary values
 
 Layer 2 (TypeScript/Mocha, 29 tests, `tests/plotarmor.ts`, local validator):
 - 12 happy-path tests with on-chain state assertions across all six instructions
@@ -48,6 +48,7 @@ Layer 2 (TypeScript/Mocha, 29 tests, `tests/plotarmor.ts`, local validator):
 | `AnchorRecord` for `add_version`: `anchoredObjectKind=1` (ContentArtifact), seeds off `contentArtifact` | CONFIRMED |
 | `AnchorRecord` for `anchor_evidence_contract`: `anchoredObjectKind=2` (EvidenceAnchor) | CONFIRMED |
 | `AnchorRecord` for `anchor_authorized_contract`: `anchoredObjectKind=3` (AuthorizedContractAnchor) | CONFIRMED |
+| `AnchorRecord.external_ref_hash: [u8; 32]` — all 4 anchoring instructions now accept and store this field instead of hardcoding zero. Intended to carry the 32-byte sha2-256 digest extracted from an IPFS CIDv0 (bytes 3–34 of the base58-decoded CID). Zero is a valid value (no IPFS binding). No uniqueness constraint — two records may share the same hash. Field is written unconditionally in all 4 handlers regardless of content_kind or contract_kind. Round-trip verified on devnet at slot 471473176. | CONFIRMED |
 | `ContentArtifact.is_initialized` guard prevents field overwrite on `init_if_needed` second call | CONFIRMED |
 | `ContractArtifact.is_initialized` guard prevents field overwrite on `init_if_needed` second call | CONFIRMED |
 
