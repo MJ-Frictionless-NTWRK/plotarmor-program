@@ -397,6 +397,12 @@ async function main(): Promise<void> {
     ],
     measurements,
   );
+  // Verify external_ref_hash stored correctly for anchor_evidence_contract on devnet.
+  const evidenceAr = await (program.account as any).anchorRecord.fetch(evidenceAnchorRecord);
+  const evidenceExtHash = Buffer.from(evidenceAr.externalRefHash);
+  const evidenceExtExpected = Buffer.alloc(32);
+  console.log(`anchor_evidence_contract external_ref_hash on-chain: ${evidenceExtHash.toString("hex")}`);
+  console.log(`matches submitted value: ${evidenceExtHash.equals(evidenceExtExpected) ? "YES - MATCH" : "NO - MISMATCH"}`);
 
   // SCENARIO 1 — anchor_authorized_contract (positive)
   const rawContractHash2 = randomHash();
@@ -442,6 +448,12 @@ async function main(): Promise<void> {
     ],
     measurements,
   );
+  // Verify external_ref_hash stored correctly for anchor_authorized_contract on devnet.
+  const authAr = await (program.account as any).anchorRecord.fetch(authAnchorRecord);
+  const authExtHash = Buffer.from(authAr.externalRefHash);
+  const authExtExpected = Buffer.alloc(32);
+  console.log(`anchor_authorized_contract external_ref_hash on-chain: ${authExtHash.toString("hex")}`);
+  console.log(`matches submitted value: ${authExtHash.equals(authExtExpected) ? "YES - MATCH" : "NO - MISMATCH"}`);
 
   // SCENARIO 2 — add_owner (positive)
   const newOwner = Keypair.generate();
