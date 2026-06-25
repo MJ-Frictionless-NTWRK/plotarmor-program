@@ -342,6 +342,13 @@ async function main(): Promise<void> {
     measurements,
   );
 
+  // Verify external_ref_hash stored correctly for add_version on devnet.
+  const versionAr = await (program.account as any).anchorRecord.fetch(versionAnchorRecord);
+  const versionExtHash = Buffer.from(versionAr.externalRefHash);
+  const versionExtExpected = Buffer.alloc(32); // Array(32).fill(0) was passed in
+  console.log(`add_version external_ref_hash on-chain: ${versionExtHash.toString("hex")}`);
+  console.log(`matches submitted value: ${versionExtHash.equals(versionExtExpected) ? "YES - MATCH" : "NO - MISMATCH"}`);
+
   const rawContractHash = randomHash();
   const evidenceAnchorNonce = randomHash();
 
@@ -1088,7 +1095,7 @@ async function main(): Promise<void> {
   // SCENARIO 14 — add_owner with new_threshold_shares=0 (expect ShareSumMismatch 6005)
   // add_owner.rs:68 requires new_threshold_shares > 0 && new_threshold_shares <= new_total.
   // With new_threshold_shares=0, the first condition is false; fires before the threshold/total
-  // comparison (distinct from scenario 8's "threshold > new_total" case).
+  // comparison (distinct from scenario 6's "threshold > new_total" case).
   const newOwner4 = Keypair.generate();
   const newOwnerRecord4 = derive([
     Buffer.from("owner"),

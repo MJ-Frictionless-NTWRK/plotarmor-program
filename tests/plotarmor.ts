@@ -151,6 +151,7 @@ describe("PlotArmor", () => {
     claimArtifactLink: PublicKey;
     anchorRecord: PublicKey;
     linkNonce: Buffer;
+    externalRefHash: Buffer;
   }> {
     const signer = opts.signer ?? payer;
     const rawHash = opts.rawHash ?? rh();
@@ -169,8 +170,9 @@ describe("PlotArmor", () => {
       anchorNonce,
     ]);
 
+    const externalRefHash = rh();
     await program.methods
-      .addVersion(ba(rawHash), 1, ba(linkNonce), ba(anchorNonce), 1, expectedPreviousLink, ba(rh()))
+      .addVersion(ba(rawHash), 1, ba(linkNonce), ba(anchorNonce), 1, expectedPreviousLink, ba(externalRefHash))
       .accountsStrict({
         registryConfig,
         workClaim,
@@ -183,7 +185,7 @@ describe("PlotArmor", () => {
       .signers(opts.signer ? [opts.signer] : [])
       .rpc();
 
-    return { rawHash, contentArtifact, claimArtifactLink, anchorRecord, linkNonce };
+    return { rawHash, contentArtifact, claimArtifactLink, anchorRecord, linkNonce, externalRefHash };
   }
 
   // Initialize the registry config once for the whole suite.
@@ -324,6 +326,7 @@ describe("PlotArmor", () => {
       const ar = await program.account.anchorRecord.fetch(v.anchorRecord);
       expect(ar.anchoredObject.toBase58()).to.equal(v.contentArtifact.toBase58());
       expect(ar.anchoredObjectKind).to.equal(1); // ContentArtifact
+      expect(Buffer.from(ar.externalRefHash)).to.deep.equal(v.externalRefHash);
     });
   });
 
@@ -375,8 +378,9 @@ describe("PlotArmor", () => {
       ]);
 
       // args: rawContractHash, contractKind, anchorNonce, anchorModeArg, assertedWorkClaim
+      const evidenceExtHash = rh();
       await program.methods
-        .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, f.workClaim, ba(rh()))
+        .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, f.workClaim, ba(evidenceExtHash))
         .accountsStrict({
           registryConfig,
           contractArtifact,
@@ -398,6 +402,7 @@ describe("PlotArmor", () => {
       expect(ar.anchoredObject.toBase58()).to.equal(evidenceAnchor.toBase58());
       expect(ar.anchoredObjectKind).to.equal(2); // EvidenceAnchor
       expect(ar.anchorMode).to.equal(1);
+      expect(Buffer.from(ar.externalRefHash)).to.deep.equal(evidenceExtHash);
     });
 
     it("zero pubkey as assertedWorkClaim is accepted (unilateral anchor)", async () => {
@@ -450,8 +455,9 @@ describe("PlotArmor", () => {
       ]);
 
       // args: rawContractHash, contractKind, anchorNonce, anchorModeArg
+      const authExtHash = rh();
       await program.methods
-        .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce), 1, ba(rh()))
+        .anchorAuthorizedContract(ba(rawContractHash), 1, ba(anchorNonce), 1, ba(authExtHash))
         .accountsStrict({
           registryConfig,
           workClaim: f.workClaim,
@@ -472,6 +478,7 @@ describe("PlotArmor", () => {
       expect(ar.anchoredObject.toBase58()).to.equal(authorizedContractAnchor.toBase58());
       expect(ar.anchoredObjectKind).to.equal(3); // AuthorizedContractAnchor
       expect(ar.anchorMode).to.equal(1);
+      expect(Buffer.from(ar.externalRefHash)).to.deep.equal(authExtHash);
     });
   });
 
