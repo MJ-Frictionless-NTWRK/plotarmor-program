@@ -1351,3 +1351,362 @@ fn ext_ref_cannot_overwrite_via_reregister() {
     let ar: AnchorRecord = read_account(&ctx.svm, &original_anchor);
     assert_eq!(ar.external_ref_hash, [0xAA; 32]);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// external_ref_hash stress tests — add_version, anchor_evidence_contract,
+// anchor_authorized_contract
+// Mirrors the register_work_claim stress tests above, one block per instruction.
+// Appended 2026-06-23.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Helper: add a version with an explicit external_ref_hash.
+// Returns the AnchorRecord PDA.
+fn add_version_with_ext_ref(
+    svm: &mut litesvm::LiteSVM,
+    claimant: &Keypair,
+    registry_config: Pubkey,
+    work_claim: Pubkey,
+    raw_hash: [u8; 32],
+    link_nonce: [u8; 32],
+    anchor_nonce: [u8; 32],
+    expected_previous_link: Pubkey,
+    external_ref_hash: [u8; 32],
+) -> Pubkey {
+    let content_artifact =
+        Pubkey::find_program_address(&[b"content", raw_hash.as_ref()], &plotarmor::ID).0;
+    let claim_artifact_link = Pubkey::find_program_address(
+        &[b"claim_artifact", work_claim.as_ref(), link_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let anchor_record = Pubkey::find_program_address(
+        &[b"anchor", content_artifact.as_ref(), anchor_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::AddVersion {
+            raw_hash,
+            content_kind: 1,
+            link_nonce,
+            anchor_nonce,
+            anchor_mode_arg: ANCHOR_MODE,
+            expected_previous_link,
+            external_ref_hash,
+        }
+        .data(),
+        plotarmor::accounts::AddVersion {
+            registry_config,
+            work_claim,
+            content_artifact,
+            claim_artifact_link,
+            anchor_record,
+            claimant: claimant.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    send_instruction(svm, instruction, claimant);
+    anchor_record
+}
+
+// Helper: anchor an evidence contract with an explicit external_ref_hash.
+// Returns the AnchorRecord PDA.
+fn anchor_evidence_with_ext_ref(
+    svm: &mut litesvm::LiteSVM,
+    anchorer: &Keypair,
+    registry_config: Pubkey,
+    raw_contract_hash: [u8; 32],
+    anchor_nonce: [u8; 32],
+    asserted_work_claim: Pubkey,
+    external_ref_hash: [u8; 32],
+) -> Pubkey {
+    let contract_artifact =
+        Pubkey::find_program_address(&[b"contract_artifact", raw_contract_hash.as_ref()], &plotarmor::ID).0;
+    let evidence_anchor = Pubkey::find_program_address(
+        &[b"evidence", anchorer.pubkey().as_ref(), contract_artifact.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let anchor_record = Pubkey::find_program_address(
+        &[b"anchor", evidence_anchor.as_ref(), anchor_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::AnchorEvidenceContract {
+            raw_contract_hash,
+            contract_kind: 1,
+            anchor_nonce,
+            anchor_mode_arg: ANCHOR_MODE,
+            asserted_work_claim,
+            external_ref_hash,
+        }
+        .data(),
+        plotarmor::accounts::AnchorEvidenceContract {
+            registry_config,
+            contract_artifact,
+            evidence_anchor,
+            anchor_record,
+            anchorer: anchorer.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    send_instruction(svm, instruction, anchorer);
+    anchor_record
+}
+
+// Helper: anchor an authorized contract with an explicit external_ref_hash.
+// Returns the AnchorRecord PDA.
+fn anchor_authorized_with_ext_ref(
+    svm: &mut litesvm::LiteSVM,
+    admin: &Keypair,
+    registry_config: Pubkey,
+    work_claim: Pubkey,
+    ownership: Pubkey,
+    raw_contract_hash: [u8; 32],
+    anchor_nonce: [u8; 32],
+    external_ref_hash: [u8; 32],
+) -> Pubkey {
+    let contract_artifact =
+        Pubkey::find_program_address(&[b"contract_artifact", raw_contract_hash.as_ref()], &plotarmor::ID).0;
+    let authorized_contract_anchor = Pubkey::find_program_address(
+        &[b"authorized_contract", work_claim.as_ref(), contract_artifact.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let anchor_record = Pubkey::find_program_address(
+        &[b"anchor", authorized_contract_anchor.as_ref(), anchor_nonce.as_ref()],
+        &plotarmor::ID,
+    )
+    .0;
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::AnchorAuthorizedContract {
+            raw_contract_hash,
+            contract_kind: 1,
+            anchor_nonce,
+            anchor_mode_arg: ANCHOR_MODE,
+            external_ref_hash,
+        }
+        .data(),
+        plotarmor::accounts::AnchorAuthorizedContract {
+            registry_config,
+            work_claim,
+            ownership,
+            contract_artifact,
+            authorized_contract_anchor,
+            anchor_record,
+            admin: admin.pubkey(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    send_instruction(svm, instruction, admin);
+    anchor_record
+}
+
+// ── add_version stress tests ──────────────────────────────────────────────────
+
+#[test]
+fn add_version_ext_ref_all_zeros_accepted() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let (_, work_claim) = register_claim_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [50; 32], [51; 32], [52; 32], [0u8; 32],
+    );
+    let root_link = Pubkey::find_program_address(
+        &[b"claim_artifact", work_claim.as_ref(), [51u8; 32].as_ref()],
+        &plotarmor::ID,
+    ).0;
+    let ar_pda = add_version_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config, work_claim,
+        [53; 32], [54; 32], [55; 32], root_link, [0u8; 32],
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, [0u8; 32]);
+}
+
+#[test]
+fn add_version_ext_ref_all_ones_accepted() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let (_, work_claim) = register_claim_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [60; 32], [61; 32], [62; 32], [0u8; 32],
+    );
+    let root_link = Pubkey::find_program_address(
+        &[b"claim_artifact", work_claim.as_ref(), [61u8; 32].as_ref()],
+        &plotarmor::ID,
+    ).0;
+    let ar_pda = add_version_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config, work_claim,
+        [63; 32], [64; 32], [65; 32], root_link, [0xFFu8; 32],
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, [0xFFu8; 32]);
+}
+
+#[test]
+fn add_version_ext_ref_realistic_cid_digest_roundtrips() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let digest: [u8; 32] = [
+        0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x6f, 0x70, 0x81,
+        0x92, 0xa3, 0xb4, 0xc5, 0xd6, 0xe7, 0xf8, 0x09,
+        0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87,
+        0x98, 0xa9, 0xba, 0xcb, 0xdc, 0xed, 0xfe, 0x0f,
+    ];
+    let (_, work_claim) = register_claim_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [70; 32], [71; 32], [72; 32], [0u8; 32],
+    );
+    let root_link = Pubkey::find_program_address(
+        &[b"claim_artifact", work_claim.as_ref(), [71u8; 32].as_ref()],
+        &plotarmor::ID,
+    ).0;
+    let ar_pda = add_version_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config, work_claim,
+        [73; 32], [74; 32], [75; 32], root_link, digest,
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, digest);
+}
+
+#[test]
+fn add_version_ext_ref_distinct_from_root() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let root_ext: [u8; 32] = [0x11; 32];
+    let version_ext: [u8; 32] = [0x22; 32];
+    let (root_ar_pda, work_claim) = register_claim_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [80; 32], [81; 32], [82; 32], root_ext,
+    );
+    let root_link = Pubkey::find_program_address(
+        &[b"claim_artifact", work_claim.as_ref(), [81u8; 32].as_ref()],
+        &plotarmor::ID,
+    ).0;
+    let ver_ar_pda = add_version_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config, work_claim,
+        [83; 32], [84; 32], [85; 32], root_link, version_ext,
+    );
+    let root_ar: AnchorRecord = read_account(&ctx.svm, &root_ar_pda);
+    let ver_ar: AnchorRecord = read_account(&ctx.svm, &ver_ar_pda);
+    assert_eq!(root_ar.external_ref_hash, root_ext);
+    assert_eq!(ver_ar.external_ref_hash, version_ext);
+    assert_ne!(root_ar.external_ref_hash, ver_ar.external_ref_hash);
+}
+
+// ── anchor_evidence_contract stress tests ─────────────────────────────────────
+
+#[test]
+fn evidence_ext_ref_all_zeros_accepted() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let ar_pda = anchor_evidence_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [90; 32], [91; 32], Pubkey::default(), [0u8; 32],
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, [0u8; 32]);
+}
+
+#[test]
+fn evidence_ext_ref_all_ones_accepted() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let ar_pda = anchor_evidence_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [92; 32], [93; 32], Pubkey::default(), [0xFFu8; 32],
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, [0xFFu8; 32]);
+}
+
+#[test]
+fn evidence_ext_ref_realistic_cid_digest_roundtrips() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let digest: [u8; 32] = [
+        0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x6f, 0x70, 0x81,
+        0x92, 0xa3, 0xb4, 0xc5, 0xd6, 0xe7, 0xf8, 0x09,
+        0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87,
+        0x98, 0xa9, 0xba, 0xcb, 0xdc, 0xed, 0xfe, 0x0f,
+    ];
+    let ar_pda = anchor_evidence_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [94; 32], [95; 32], Pubkey::default(), digest,
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, digest);
+}
+
+// ── anchor_authorized_contract stress tests ───────────────────────────────────
+
+#[test]
+fn authorized_ext_ref_all_zeros_accepted() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let (_, work_claim) = register_claim_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [100; 32], [101; 32], [102; 32], [0u8; 32],
+    );
+    let ownership = Pubkey::find_program_address(
+        &[b"ownership", work_claim.as_ref()], &plotarmor::ID,
+    ).0;
+    let ar_pda = anchor_authorized_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config, work_claim, ownership,
+        [103; 32], [104; 32], [0u8; 32],
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, [0u8; 32]);
+}
+
+#[test]
+fn authorized_ext_ref_all_ones_accepted() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let (_, work_claim) = register_claim_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [105; 32], [106; 32], [107; 32], [0u8; 32],
+    );
+    let ownership = Pubkey::find_program_address(
+        &[b"ownership", work_claim.as_ref()], &plotarmor::ID,
+    ).0;
+    let ar_pda = anchor_authorized_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config, work_claim, ownership,
+        [108; 32], [109; 32], [0xFFu8; 32],
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, [0xFFu8; 32]);
+}
+
+#[test]
+fn authorized_ext_ref_realistic_cid_digest_roundtrips() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+    let digest: [u8; 32] = [
+        0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x6f, 0x70, 0x81,
+        0x92, 0xa3, 0xb4, 0xc5, 0xd6, 0xe7, 0xf8, 0x09,
+        0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87,
+        0x98, 0xa9, 0xba, 0xcb, 0xdc, 0xed, 0xfe, 0x0f,
+    ];
+    let (_, work_claim) = register_claim_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config,
+        [110; 32], [111; 32], [112; 32], [0u8; 32],
+    );
+    let ownership = Pubkey::find_program_address(
+        &[b"ownership", work_claim.as_ref()], &plotarmor::ID,
+    ).0;
+    let ar_pda = anchor_authorized_with_ext_ref(
+        &mut ctx.svm, &ctx.authority, registry_config, work_claim, ownership,
+        [113; 32], [114; 32], digest,
+    );
+    let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
+    assert_eq!(ar.external_ref_hash, digest);
+}
