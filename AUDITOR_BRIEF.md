@@ -26,8 +26,8 @@ Layer 1 (Rust/LiteSVM, 44 tests, `programs/plotarmor/tests/`):
 - `happy_paths.rs`: 11 tests — all instructions, content-addressing convergence, chained versions, chain reuse, reserved-field enforcement
 - `security_tests.rs`: 32 tests — all error codes, atomicity, PDA collision, cross-claim rejections, enum boundary values
 
-Layer 2 (TypeScript/Mocha, 29 tests, `tests/plotarmor.ts`, local validator):
-- 12 happy-path tests with on-chain state assertions across all six instructions
+Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
+- 13 happy-path tests with on-chain state assertions across all six instructions
 - 17 rejection tests confirming every error code path
 
 **Devnet scenario suite** (`scripts/measure_devnet.ts`): 21 scenarios — positive measurements and adversarial edge cases. All pass. Script exits non-zero on any failure.
