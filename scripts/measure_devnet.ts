@@ -694,6 +694,9 @@ async function main(): Promise<void> {
   // WorkClaim closure is unsupported in v1. Triggering this path requires a program
   // upgrade or a test-only backdoor, neither of which belongs in this devnet script.
 
+  // SCENARIO 8 — intentionally merged into scenario 6. The threshold > new_total case
+  //                (add_owner(10, 1, 141)) covers the same ShareSumMismatch path.
+  //                The distinct threshold=0 case is covered by scenario 14.
   // SCENARIO 9 — register_work_claim with total_shares=0 (expect ShareSumMismatch 6005)
   // register_work_claim.rs:107 requires total_shares > 0 && threshold_shares > 0.
   // The check is in the handler body; init accounts are attempted first then rolled back
@@ -761,7 +764,7 @@ async function main(): Promise<void> {
 
   // SCENARIO 10 — register_work_claim with claim_kind=255 (expect AnchorModeNotAllowed 6002)
   // Confirms ClaimKind::from_u8 rejects the u8 max boundary identically to an arbitrary
-  // out-of-range value (99 in scenario 6). Fresh PDAs are needed because scenario 9 rolled back.
+  // out-of-range value (99 in scenario 4). Fresh PDAs are needed because scenario 9 rolled back.
   const rawHash10 = randomHash();
   const linkNonce10 = randomHash();
   const anchorNonce10 = randomHash();
