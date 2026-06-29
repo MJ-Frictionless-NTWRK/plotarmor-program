@@ -201,9 +201,9 @@ NOTE: installer pulled newer versions than the white paper (paper specifies Sola
 Anchor 0.32.1). Verify via the Solana MCP that no API change affects the canon before building.
 TS client: @coral-xyz/anchor + @solana/web3.js (or @solana/kit), wallet-adapter.
 Tests: two-layer suite.
-  Layer 1 — Rust/LiteSVM: `cargo test` runs 28 integration tests in
+  Layer 1 — Rust/LiteSVM: `cargo test` runs 44 integration tests in
     programs/plotarmor/tests/ (happy_paths.rs + security_tests.rs). Fast, no validator needed.
-  Layer 2 — TypeScript/Anchor: `anchor test` deploys to a local validator and runs 29
+  Layer 2 — TypeScript/Anchor: `anchor test` deploys to a local validator and runs 30
     Mocha/Chai tests in tests/plotarmor.ts. Covers all six instructions with on-chain
     state assertions and 17 rejection tests verifying every error code path.
   Combined: `yarn test` runs cargo test then anchor test sequentially.
@@ -259,8 +259,8 @@ against Appendix C invariants and Appendix G acceptance checklist specifically.
 
 ## Test coverage report (June 2026)
 
-Two suites run against the deployed program, totaling 57 tests: 28 Rust/LiteSVM and 29
-TypeScript/Mocha (local validator). All 57 pass as of commit 2b55abb.
+Two suites run against the deployed program, totaling 74 tests: 44 Rust/LiteSVM and 30
+TypeScript/Mocha (local validator). All 74 pass as of commit c40f09a.
 
 Invariants confirmed green by TypeScript on-chain assertions:
 - latest_link.content_artifact == latest_artifact after every chain-touching tx
@@ -298,7 +298,7 @@ devnet scenario coverage (scripts/measure_devnet.ts, 21 scenarios, all pass):
   registry config replay, cross-claim add_version, cross-claim authorized contract,
   AuthorizedContractAnchor PDA collision. All pass; harness exits non-zero on any failure.
 
-Auditor brief: AUDITOR_BRIEF.md in the repo root covers test coverage, invariants, error codes, known limitations A-E, and audit focus areas. Commit: cb61f79.
+Auditor brief: AUDITOR_BRIEF.md in the repo root covers test coverage, invariants, error codes, known limitations A-E, and audit focus areas. Commit: c40f09a.
 1. Rights Index ingestion: Supabase Edge Function listens for Solana events and writes to the database.
    No separate indexer service. Use a clean repository abstraction layer in the query code so the
    database can be swapped later without touching the rest of the codebase.
@@ -312,3 +312,56 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
 ## Pending decisions (do NOT implement; ask the human when these come up)
 5. Custody model policy for case-study partners (gates user_signed / multi_party modes; needs counsel).
 6. Canonicalization spec v1 with test vectors (needed before case study onboarding; documentation task).
+
+## Permanent verification toolchain (run before every commit)
+- `python3 scripts/verify_calls.py scripts/measure_devnet.ts tests/plotarmor.ts`
+  Checks argument counts for all 4 instruction call sites. Expected: registerWorkClaim=9,
+  addVersion=7, anchorEvidenceContract=6, anchorAuthorizedContract=5.
+- `python3 scripts/check_integrity.py scripts/measure_devnet.ts tests/plotarmor.ts`
+  Checks args + .accountsStrict() present + .rpc()/.instruction() terminator for every call.
+- Both tools exit non-zero on any failure. Run both after any instruction signature change.
+- FULL-REPO GREP before any instruction signature change:
+  `grep -rn "\.registerWorkClaim\|\.addVersion\|\.anchorEvidenceContract\|\.anchorAuthorizedContract" . | grep -v node_modules | grep -v target`
+
+## Devnet script inventory (scripts/)
+- `measure_devnet.ts` — 24 scenarios (1-7, 9-24; scenario 8 merged into 6). Primary devnet
+  proof suite. Exits non-zero on any failure. Run with:
+  `HELIUS_API_KEY=<key> node_modules/.bin/ts-node --transpile-only scripts/measure_devnet.ts`
+- `devnet_register_test.ts` — standalone proof script for register_work_claim with real CID digest
+- `devnet_ext_ref_hash_test.ts` — 14 adversarial scenarios across all 4 instructions:
+  realistic CIDv0 digest, all-ones boundary, invalid contract_kind=99, invalid anchor_mode_arg=99.
+  All 14 pass on live devnet.
+
+## external_ref_hash — full coverage summary
+- All 4 anchoring instructions accept and store external_ref_hash: [u8; 32]
+- Rust LiteSVM: 10 adversarial stress tests (zeros, all-ones, realistic CIDv0 digest, distinct
+  per instruction) in security_tests.rs — helpers: add_version_with_ext_ref,
+  anchor_evidence_with_ext_ref, anchor_authorized_with_ext_ref
+- TypeScript: externalRefHash assertions in all 3 happy-path AnchorRecord tests
+- Devnet round-trip: all 4 instructions verified YES-MATCH via measure_devnet.ts readback
+- devnet_ext_ref_hash_test.ts: 14 adversarial devnet scenarios, all green
+- CID digest extraction: bytes 2-33 (0-indexed) after stripping 0x12 0x20 multihash prefix
+
+## Demo repo integration (plotarmor-demo, commit 3c3f8c9)
+- `src/anchor/plotarmor.json` and `src/anchor/plotarmor.ts` — IDL and types copied from
+  target/ after each anchor build. Keep in sync when program changes.
+- `@solana/web3.js` and `@coral-xyz/anchor` installed as dependencies in demo repo.
+- `src/vault/ipfs.ts` — cidToExternalRefHash() and cidToExternalRefHashArray() utilities.
+  Use cidToExternalRefHashArray(cid) when passing external_ref_hash to program instructions.
+- IPFS wiring: UploadFlow.tsx uploads encrypted blobs via Supabase Edge Function
+  (supabase/functions/upload-to-ipfs/index.ts) to Pinata. file_path = "ipfs://" + cid.
+  ipfs_cid column added to works table.
+- Download routing: downloadFile(rawFilePath) in queries.ts branches on ipfs:// vs supabase://.
+  Existing works with supabase:// paths unaffected.
+- Cross-repo wiring proven: scripts/pa_solana_wiring_test.js uploads to Pinata, extracts
+  CIDv0 digest, calls register_work_claim with that digest as external_ref_hash, reads back
+  AnchorRecord.external_ref_hash on-chain — exact match confirmed on devnet.
+
+## Wallet wiring (pending — do not start without human approval)
+- Use @solana/wallet-adapter-react for Phantom/Backpack connection.
+- Do NOT use @solana/kit for wallet connection (per canon above).
+- register_work_claim triggered after successful IPFS upload in UploadFlow.tsx.
+- Pass cidToExternalRefHashArray(cid) as external_ref_hash argument.
+- Store returned PDAs (work_claim_pda, anchor_record_pda, content_artifact_pda) back to
+  works row in Supabase. Progress anchor_state: "none" -> "submitted" -> "confirmed".
+- Devnet only until told otherwise.
