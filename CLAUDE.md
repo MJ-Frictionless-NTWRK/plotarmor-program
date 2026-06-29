@@ -117,22 +117,22 @@ pub struct AnchorRecord {             // ~82 bytes; carries NO lifecycle state
     pub anchored_object_kind: u8,
     pub anchor_mode: u8,
     pub created_at: i64,
-    pub external_ref_hash: [u8; 32],  // [0;32] when no secondary anchor
+    pub external_ref_hash: [u8; 32],  // IPFS CIDv0 digest (32 bytes after stripping 0x12 0x20 multihash prefix); zero when no IPFS binding yet
 }
 ```
 
 ## Instructions (v1 set)
-- register_work_claim(raw_hash, claim_kind, share params, link_nonce, anchor_nonce, anchor_mode_arg)
+- register_work_claim(raw_hash, content_kind, claim_kind, share params, link_nonce, anchor_nonce, anchor_mode_arg, external_ref_hash)
   Creates ContentArtifact (init_if_needed), WorkClaim, Ownership, first OwnerRecord,
   the FIRST ClaimArtifactLink (previous_link = zero), and an AnchorRecord for the registration.
   Sets work_claim.latest_link to that first link. anchor_mode_arg passed through assert_mode_allowed.
-- add_version(link_nonce, anchor_nonce, expected_previous_link)
+- add_version(raw_hash, content_kind, link_nonce, anchor_nonce, anchor_mode_arg, expected_previous_link, external_ref_hash)
   MUST validate expected_previous_link == work_claim.latest_link, else revert StaleLineageHead.
   Then create new ContentArtifact (init_if_needed), new ClaimArtifactLink (previous_link = old head),
   new AnchorRecord, and update BOTH latest_link and latest_artifact in place.
 - add_owner / ownership ops (threshold-governed)
-- anchor_evidence_contract(...) -> ContractArtifact (init_if_needed) + EvidenceAnchor + AnchorRecord
-- anchor_authorized_contract(...) -> ContractArtifact + AuthorizedContractAnchor + AnchorRecord
+- anchor_evidence_contract(raw_contract_hash, contract_kind, anchor_nonce, anchor_mode_arg, asserted_work_claim, external_ref_hash) -> ContractArtifact (init_if_needed) + EvidenceAnchor + AnchorRecord
+- anchor_authorized_contract(raw_contract_hash, contract_kind, anchor_nonce, anchor_mode_arg, external_ref_hash) -> ContractArtifact + AuthorizedContractAnchor + AnchorRecord
   (requires threshold-meeting signatures from the WorkClaim's Ownership)
 
 ## Invariants (test every one)
