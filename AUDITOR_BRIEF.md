@@ -20,7 +20,7 @@ This brief covers the PlotArmor Anchor program implementing the v1 instruction s
 
 **Manual review:** Conducted against the white paper spec, Appendix C invariants, and Appendix G acceptance checklist.
 
-**Test coverage — 57 tests total, all passing as of commit `cb61f79`:**
+**Test coverage — 74 tests total, all passing as of commit `67f9563`:**
 
 Layer 1 (Rust/LiteSVM, 44 tests, `programs/plotarmor/tests/`):
 - `happy_paths.rs`: 11 tests — all instructions, content-addressing convergence, chained versions, chain reuse, reserved-field enforcement
@@ -48,7 +48,7 @@ Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
 | `AnchorRecord` for `add_version`: `anchoredObjectKind=1` (ContentArtifact), seeds off `contentArtifact` | CONFIRMED |
 | `AnchorRecord` for `anchor_evidence_contract`: `anchoredObjectKind=2` (EvidenceAnchor) | CONFIRMED |
 | `AnchorRecord` for `anchor_authorized_contract`: `anchoredObjectKind=3` (AuthorizedContractAnchor) | CONFIRMED |
-| `AnchorRecord.external_ref_hash: [u8; 32]` — all 4 anchoring instructions now accept and store this field instead of hardcoding zero. Intended to carry the 32-byte sha2-256 digest extracted from an IPFS CIDv0 (bytes 3–34 of the base58-decoded CID). Zero is a valid value (no IPFS binding). No uniqueness constraint — two records may share the same hash. Field is written unconditionally in all 4 handlers regardless of content_kind or contract_kind. Round-trip verified on devnet at slot 471473176. Adversarial stress tests: zeros, all-ones (0xFF×32), and realistic CIDv0 digest proven for all 4 instructions in Rust LiteSVM (security_tests.rs) and on live devnet (scripts/devnet_ext_ref_hash_test.ts, 14 scenarios). | CONFIRMED |
+| `AnchorRecord.external_ref_hash: [u8; 32]` — all 4 anchoring instructions now accept and store this field instead of hardcoding zero. Intended to carry the 32-byte sha2-256 digest extracted from an IPFS CIDv0 (bytes 2–33 (0-indexed) of the base58-decoded CID, after stripping the 2-byte multihash prefix 0x12 0x20). Zero is a valid value (no IPFS binding). No uniqueness constraint — two records may share the same hash. Field is written unconditionally in all 4 handlers regardless of content_kind or contract_kind. Round-trip verified on devnet at slot 471473176. Adversarial stress tests: zeros, all-ones (0xFF×32), and realistic CIDv0 digest proven for all 4 instructions in Rust LiteSVM (security_tests.rs) and on live devnet (scripts/devnet_ext_ref_hash_test.ts, 14 scenarios). | CONFIRMED |
 | `ContentArtifact.is_initialized` guard prevents field overwrite on `init_if_needed` second call | CONFIRMED |
 | `ContractArtifact.is_initialized` guard prevents field overwrite on `init_if_needed` second call | CONFIRMED |
 
@@ -135,7 +135,7 @@ White paper sections D.2 and 15.6 describe threshold approval for version advanc
 
 ## 9. Execution-order observation (non-blocking)
 
-The `Unauthorized` check in `add_version` (checking `signer == work_claim.claimant`) is a `require!()` in the handler body, not an Anchor account constraint. Anchor's `init` constraints for `ClaimArtifactLink` and `AnchorRecord` execute before the handler body, meaning a wrong-claimant call creates and immediately rolls back those accounts within a single atomic transaction. There is no security impact (Solana's atomicity guarantees complete rollback), but this is a code-style observation: converting to a `has_one = claimant` account constraint would run the check before any account initialization, which is more conventional. Noted for Ackee's discretion.
+The `Unauthorized` check in `add_version` uses a `has_one = claimant` account constraint (not a `require!()` in the handler body). Anchor's `init` constraints for `ClaimArtifactLink` and `AnchorRecord` execute before the `has_one` constraint, meaning a wrong-claimant call still creates and immediately rolls back those accounts within a single atomic transaction. There is no security impact (Solana's atomicity guarantees complete rollback). The `has_one` placement is the idiomatic Anchor pattern and is confirmed by devnet scenario 23 (3 System Program CPIs observed preceding the `Unauthorized` revert).
 
 ---
 
@@ -151,4 +151,4 @@ Per the white paper, auditor review should cover Appendix C (invariants) and App
 
 ---
 
-*Prepared: June 2026. Program commit: `cb61f79`. All 57 tests passing.*
+*Prepared: June 2026. Program commit: `67f9563`. All 74 tests passing. Demo repo commit: `f6f82e0`. IPFS wiring complete.*
