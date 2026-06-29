@@ -328,6 +328,34 @@ describe("PlotArmor", () => {
       expect(ar.anchoredObjectKind).to.equal(1); // ContentArtifact
       expect(Buffer.from(ar.externalRefHash)).to.deep.equal(v.externalRefHash);
     });
+    it("add_version accepts different content_kind from original registration", async () => {
+      // Register with content_kind=1 (screenplay), then add a version with content_kind=2 (treatment).
+      // Each ContentArtifact carries its own content_kind written at creation time.
+      const f = await registerClaim();
+      const rawHash2  = rh();
+      const linkNonce = rh();
+      const anchorNonce = rh();
+      const contentArtifact2 = derive([Buffer.from("content"), rawHash2]);
+      const claimArtifactLink = derive([Buffer.from("claim_artifact"), f.workClaim.toBuffer(), linkNonce]);
+      const anchorRecord = derive([Buffer.from("anchor"), contentArtifact2.toBuffer(), anchorNonce]);
+      await program.methods
+        .addVersion(ba(rawHash2), 2, ba(linkNonce), ba(anchorNonce), 1, f.claimArtifactLink, ba(rh()))
+        .accountsStrict({
+          registryConfig,
+          workClaim: f.workClaim,
+          contentArtifact: contentArtifact2,
+          claimArtifactLink,
+          anchorRecord,
+          claimant: payer.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      const ca = await program.account.contentArtifact.fetch(contentArtifact2);
+      const wc = await program.account.workClaim.fetch(f.workClaim);
+      expect(ca.contentKind).to.equal(2); // treatment, not screenplay
+      expect(ca.isInitialized).to.be.true;
+      expect(wc.latestArtifact.toBase58()).to.equal(contentArtifact2.toBase58());
+    });
   });
 
   describe("content-addressing convergence", () => {
