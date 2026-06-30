@@ -218,6 +218,30 @@ Tests: two-layer suite.
 - Switch back down to Sonnet or Haiku immediately after a hard task; do not leave Opus running for
   routine edits. Run `/usage` to check the remaining window before a large task.
 
+## Lane assignment (Codex / Claude Code split)
+
+Two agents operate on this codebase. Keep work in the correct lane; do not cross lanes
+without explicit instruction.
+
+Lane 1 — Claude Code (this agent):
+- Anchor program correctness: instruction handlers, account structs, PDA seeds, invariants.
+- Anti-fork logic (add_version lineage check). Reserve Opus for this.
+- Security review. Reserve Opus for this.
+- Rust/LiteSVM tests (programs/plotarmor/tests/) and TypeScript/Anchor tests (tests/plotarmor.ts).
+- Devnet proof scripts (scripts/measure_devnet.ts and companions).
+- Permanent verification toolchain (verify_calls.py, check_integrity.py).
+- CLAUDE.md and AUDITOR_BRIEF.md maintenance.
+
+Lane 2 — Codex (GPT Plus):
+- Demo repo work (plotarmor-demo) defaults to Codex unless the task involves Anchor program logic.
+- Mechanical wiring: copying IDL/types to demo repo, updating import paths, renaming variables.
+- Frontend boilerplate: React hooks, Supabase query wiring, UI scaffolding.
+- Wallet-adapter integration scaffolding once approved (see Wallet wiring section).
+- Repetitive find-and-replace across the demo repo.
+
+Handoff rule: if Codex produces a change that touches the on-chain program, instruction
+signatures, PDA seeds, or account structs, bring the diff to Lane 1 for review before merging.
+
 ## Known v1 limitations (from security review, June 2026)
 These are documented deviations and intentional gaps. Do not "fix" them silently — they require
 explicit decisions. Flag any work touching these areas with COME TO CLAUDE CHAT.
