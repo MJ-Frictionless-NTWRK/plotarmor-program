@@ -218,26 +218,26 @@ Tests: two-layer suite.
 - Switch back down to Sonnet or Haiku immediately after a hard task; do not leave Opus running for
   routine edits. Run `/usage` to check the remaining window before a large task.
 
-## Lane assignment (Codex / Claude Code split)
+## Lane assignment (token efficiency — do not violate)
+Work is split across two agents to preserve the Claude Pro window for what actually needs it.
 
-Two agents operate on this codebase. Keep work in the correct lane; do not cross lanes
-without explicit instruction.
+Lane 1 — Claude Code (this session), Opus reserved for hard logic:
+- Anchor program correctness: PDA seeds, anti-fork logic (add_version StaleLineageHead),
+  threshold arithmetic, init_if_needed guards, account constraints
+- Security review and architectural decisions
+- Anything flagged COME TO CLAUDE CHAT or requiring Opus per the model assessment protocol
 
-Lane 1 — Claude Code (this agent):
-- Anchor program correctness: instruction handlers, account structs, PDA seeds, invariants.
-- Anti-fork logic (add_version lineage check). Reserve Opus for this.
-- Security review. Reserve Opus for this.
-- Rust/LiteSVM tests (programs/plotarmor/tests/) and TypeScript/Anchor tests (tests/plotarmor.ts).
-- Devnet proof scripts (scripts/measure_devnet.ts and companions).
-- Permanent verification toolchain (verify_calls.py, check_integrity.py).
-- CLAUDE.md and AUDITOR_BRIEF.md maintenance.
+Lane 2 — Codex (GPT Plus), NOT Claude Code or Claude Chat:
+- Boilerplate and test scaffolding
+- React/web3 hook wiring (frontend IDL -> typed hooks -> wallet adapter)
+- Mechanical demo-repo work: Edge Functions, query layer plumbing, UI wiring
+- Anything Claude Code would flag SWITCH TO HAIKU should be evaluated for Codex instead --
+  if it's mechanical wiring rather than Anchor-program-adjacent logic, it belongs in Codex.
 
-Lane 2 — Codex (GPT Plus):
-- Demo repo work (plotarmor-demo) defaults to Codex unless the task involves Anchor program logic.
-- Mechanical wiring: copying IDL/types to demo repo, updating import paths, renaming variables.
-- Frontend boilerplate: React hooks, Supabase query wiring, UI scaffolding.
-- Wallet-adapter integration scaffolding once approved (see Wallet wiring section).
-- Repetitive find-and-replace across the demo repo.
+Rule: before starting demo-repo (plotarmor-demo) frontend/wiring work in Claude Code or
+Claude Chat, ask: "could this run in Codex instead?" If yes, it should run in Codex, not here.
+This preserves the Claude Pro window for Lane 1 work, which is the harder and more
+consequential lane (rights-evidence correctness on-chain).
 
 Handoff rule: if Codex produces a change that touches the on-chain program, instruction
 signatures, PDA seeds, or account structs, bring the diff to Lane 1 for review before merging.
