@@ -20,17 +20,17 @@ This brief covers the PlotArmor Anchor program implementing the v1 instruction s
 
 **Manual review:** Conducted against the white paper spec, Appendix C invariants, and Appendix G acceptance checklist.
 
-**Test coverage — 74 tests total, all passing as of commit `67f9563`:**
+**Test coverage — 74 tests total, all passing as of commit `c40f09a`:**
 
-Layer 1 (Rust/LiteSVM, 44 tests, `programs/plotarmor/tests/`):
+Layer 1 (Rust/LiteSVM, 44 tests: 1 unit test in `src/lib.rs` + 43 integration tests in `programs/plotarmor/tests/`):
 - `happy_paths.rs`: 11 tests — all instructions, content-addressing convergence, chained versions, chain reuse, reserved-field enforcement
 - `security_tests.rs`: 32 tests — all error codes, atomicity, PDA collision, cross-claim rejections, enum boundary values
 
 Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
-- 13 happy-path tests with on-chain state assertions across all six instructions
-- 17 rejection tests confirming every error code path
+- 14 happy-path tests with on-chain state assertions across all six instructions
+- 16 rejection tests confirming every error code path
 
-**Devnet scenario suite** (`scripts/measure_devnet.ts`): 21 scenarios — positive measurements and adversarial edge cases. All pass. Script exits non-zero on any failure.
+**Devnet scenario suite** (`scripts/measure_devnet.ts`): 24 scenarios (1-7, 9-24; scenario 8 intentionally merged into scenario 6) — positive measurements and adversarial edge cases. All pass. Script exits non-zero on any failure.
 
 ---
 
@@ -61,7 +61,7 @@ Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
 | 6000 | `AlreadyInitialized` | Reserved; not emitted by v1 handlers (`is_initialized` guard used instead) |
 | 6001 | `StaleLineageHead` | TypeScript: stale link; two-instruction atomic revert confirmed via on-chain fetch |
 | 6002 | `AnchorModeNotAllowed` | TypeScript: `content_kind=99`, `content_kind=255`, `claim_kind=99` |
-| 6003 | `SimulatedModeRejected` | Mainnet-feature-gated; not testable on devnet by design |
+| 6003 | `SimulatedModeRejected` | Mainnet-feature-gated; not testable on devnet by design. Verified by LiteSVM: `cargo test --features mainnet`, `simulated_mode_rejected_on_mainnet_build`. (A build-tooling gap previously made this test load a stale non-mainnet `.so` regardless of the `--features mainnet` flag, correctly failing since the rejection logic was never compiled in; fixed 2026-07-01 by building a distinct mainnet-featured artifact — see `programs/plotarmor/tests/common/mod.rs`.) |
 | 6004 | `ShareOverflow` | LiteSVM Rust tests |
 | 6005 | `ShareSumMismatch` | TypeScript: `total=0`, `threshold>total`, `add_owner share=0`, `threshold=0`, `threshold>new_total` |
 | 6006 | `ReservedFieldNonZero` | Reserved slot; not emitted in v1 |
@@ -151,4 +151,4 @@ Per the white paper, auditor review should cover Appendix C (invariants) and App
 
 ---
 
-*Prepared: June 2026. Program commit: `67f9563`. All 74 tests passing. Demo repo commit: `f6f82e0`. IPFS wiring complete.*
+*Prepared: June 2026; test-count, scenario-count, and build-tooling corrections applied 2026-07-01. Program commit: `c40f09a`. All 74 tests passing. Demo repo commit: `f6f82e0`. IPFS wiring complete.*
