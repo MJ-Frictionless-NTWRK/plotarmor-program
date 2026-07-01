@@ -32,6 +32,29 @@ I give you today, output your model flag first. Current model: [whatever /model 
 - Devnet prototype only until told otherwise. No mainnet deploy. Anchor mode is attested_devnet.
 - No em-dashes in any prose or comments. Do not use the word "noise".
 
+## Verification standard (hard rule, no exceptions)
+No claim of correctness, security, or completeness (in code, in commit messages, in
+AUDITOR_BRIEF.md, or when reporting back to the human) may be made until it has been
+through 4 independent verification passes. A "pass" means: an actual test run, an actual
+live behavioral check against the deployed target (not just reading source), or an
+independent re-audit by a different session/agent. Passing a test suite once is 1 pass,
+not 4. "The code looks correct" from reading it is not a pass at all.
+
+This standard exists because 3 live P0 security vulnerabilities (anonymous metadata leak
+via verify_work_by_hash, and two project_members privilege-escalation bugs) sat in
+production on 2026-07-01 despite being "fixed" in committed SQL files that were never
+actually applied to the live database, and despite multiple sessions describing the
+codebase as solid. Documentation and committed code are not evidence of live state.
+Live state must be checked directly, every time, before any claim is made. The same
+discipline applies here: AUDITOR_BRIEF.md and CLAUDE.md test-coverage claims must be
+re-verified against actual cargo test / anchor test output, not trusted from prior
+commits, since the demo-repo incident showed committed fixes and live deployments can
+silently diverge.
+
+When reporting findings or completed work back to the human, always state the actual
+audit-pass count and what remains unverified. Do not round up. "Fixed and verified once"
+is not "fixed." Provisional language is required until pass 4.
+
 ## PDA canon (permanent; seeds must never change)
 ```
 RegistryConfig PDA        = ["config"]                                              // deploy-time singleton
