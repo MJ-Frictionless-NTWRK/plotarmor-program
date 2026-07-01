@@ -27,7 +27,20 @@ pub fn setup() -> TestContext {
     let authority = Keypair::new();
     let mut svm = LiteSVM::new();
 
-    let program_bytes =
+    // The mainnet feature gates SimulatedModeRejected inside the on-chain program
+    // itself (see helpers.rs). cargo test --features mainnet only recompiles this
+    // native test crate; it does NOT rebuild the separate BPF/SBF .so that LiteSVM
+    // actually executes. Each feature set needs its own prebuilt artifact at a
+    // distinct path, or the mainnet-gated tests silently run against a stale
+    // non-mainnet binary. Build with:
+    //   default:  anchor build
+    //   mainnet:  cargo build-sbf --manifest-path programs/plotarmor/Cargo.toml \
+    //               --features mainnet --sbf-out-dir target/deploy-mainnet
+    #[cfg(feature = "mainnet")]
+    let program_bytes: &[u8] =
+        include_bytes!("../../../../target/deploy-mainnet/plotarmor.so");
+    #[cfg(not(feature = "mainnet"))]
+    let program_bytes: &[u8] =
         include_bytes!("../../../../target/deploy/plotarmor.so");
 
     svm.add_program(plotarmor::ID, program_bytes).unwrap();
