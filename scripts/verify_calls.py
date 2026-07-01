@@ -16,6 +16,7 @@ Expected argument counts (including the new trailing external_ref_hash):
   anchorAuthorizedContract: 5  (raw_contract_hash, contract_kind, anchor_nonce,
                                  anchor_mode_arg, external_ref_hash)
 """
+import os
 import re
 import sys
 
@@ -26,7 +27,7 @@ EXPECTED = {
     "anchorAuthorizedContract": 5,
 }
 
-def main(path):
+def check_file(path):
     with open(path, "r") as f:
         text = f.read()
 
@@ -78,6 +79,7 @@ def main(path):
 
     results.sort()
     all_ok = True
+    print(f"\nFile: {path}")
     print(f"{'LINE':>6}  {'METHOD':<26} {'ARGS':>4} {'EXP':>4}  STATUS")
     print("-" * 60)
     for line_no, method, args, expected, ok in results:
@@ -90,10 +92,24 @@ def main(path):
     print(f"Total calls checked: {len(results)}")
     if all_ok:
         print("ALL CALLS HAVE CORRECT ARGUMENT COUNTS")
-        return 0
     else:
         print("SOME CALLS ARE WRONG - SEE MISMATCHES ABOVE")
-        return 1
+    return all_ok
+
+def main():
+    paths = sys.argv[1:] if len(sys.argv) > 1 else ["scripts/measure_devnet.ts"]
+
+    all_ok = True
+    for path in paths:
+        if not os.path.exists(path):
+            print(f"File not found: {path}")
+            all_ok = False
+            continue
+        ok = check_file(path)
+        if not ok:
+            all_ok = False
+
+    sys.exit(0 if all_ok else 1)
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "scripts/measure_devnet.ts"))
+    main()
