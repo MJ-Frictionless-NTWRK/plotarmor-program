@@ -201,11 +201,13 @@ NOTE: installer pulled newer versions than the white paper (paper specifies Sola
 Anchor 0.32.1). Verify via the Solana MCP that no API change affects the canon before building.
 TS client: @coral-xyz/anchor + @solana/web3.js (or @solana/kit), wallet-adapter.
 Tests: two-layer suite.
-  Layer 1 — Rust/LiteSVM: `cargo test` runs 44 integration tests in
-    programs/plotarmor/tests/ (happy_paths.rs + security_tests.rs). Fast, no validator needed.
+  Layer 1 — Rust/LiteSVM: `cargo test` runs 44 tests total: 1 unit test in src/lib.rs
+    plus 43 integration tests in programs/plotarmor/tests/ (happy_paths.rs + security_tests.rs).
+    Fast, no validator needed. `cargo test --features mainnet` additionally requires a
+    mainnet-featured .so at target/deploy-mainnet/plotarmor.so — see programs/plotarmor/tests/common/mod.rs.
   Layer 2 — TypeScript/Anchor: `anchor test` deploys to a local validator and runs 30
-    Mocha/Chai tests in tests/plotarmor.ts. Covers all six instructions with on-chain
-    state assertions and 17 rejection tests verifying every error code path.
+    Mocha/Chai tests in tests/plotarmor.ts. Covers all six instructions with 14 happy-path
+    on-chain state assertions and 16 rejection tests verifying every error code path.
   Combined: `yarn test` runs cargo test then anchor test sequentially.
 
 ## Model guidance (Claude Pro: Sonnet default, Opus and Haiku both available on this plan)
@@ -301,7 +303,7 @@ Invariants confirmed green by TypeScript on-chain assertions:
   for add_version; evidenceAnchor (kind=2) for anchor_evidence_contract;
   authorizedContractAnchor (kind=3) for anchor_authorized_contract
 
-Error codes confirmed rejecting correctly (all 17 negative TypeScript tests pass):
+Error codes confirmed rejecting correctly (all 16 negative TypeScript tests pass):
   StaleLineageHead(6001), Unauthorized(6009) for both wrong-claimant and wrong-admin paths,
   AnchorModeNotAllowed(6002) for content_kind=99/255 and claim_kind=99, ShareSumMismatch(6005)
   for total=0, threshold>total, add_owner share=0 and threshold=0 and threshold>new_total,
@@ -338,12 +340,16 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
 6. Canonicalization spec v1 with test vectors (needed before case study onboarding; documentation task).
 
 ## Permanent verification toolchain (run before every commit)
-- `python3 scripts/verify_calls.py scripts/measure_devnet.ts tests/plotarmor.ts`
-  Checks argument counts for all 4 instruction call sites. Expected: registerWorkClaim=9,
-  addVersion=7, anchorEvidenceContract=6, anchorAuthorizedContract=5.
-- `python3 scripts/check_integrity.py scripts/measure_devnet.ts tests/plotarmor.ts`
+- `python3 scripts/verify_calls.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts`
+  Checks argument counts for all 4 instruction call sites across all 4 TS files that call
+  program instructions. Expected: registerWorkClaim=9, addVersion=7, anchorEvidenceContract=6,
+  anchorAuthorizedContract=5. Fixed 2026-07-01: previously only read argv[1] and silently
+  skipped every other file passed on the command line while still reporting success.
+- `python3 scripts/check_integrity.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts`
   Checks args + .accountsStrict() present + .rpc()/.instruction() terminator for every call.
 - Both tools exit non-zero on any failure. Run both after any instruction signature change.
+- `python3 scripts/test_checkers_negative.py` — negative-test suite for both checkers above;
+  run after modifying either checker to confirm they still detect bad calls.
 - FULL-REPO GREP before any instruction signature change:
   `grep -rn "\.registerWorkClaim\|\.addVersion\|\.anchorEvidenceContract\|\.anchorAuthorizedContract" . | grep -v node_modules | grep -v target`
 
