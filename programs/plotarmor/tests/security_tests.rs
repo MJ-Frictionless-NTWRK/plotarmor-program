@@ -585,6 +585,53 @@ fn simulated_mode_allowed_on_non_mainnet_build() {
         .expect("simulated mode should be allowed on non-mainnet builds");
 }
 
+// AnchorMode::AttestedMainnet = 2. Non-mainnet (devnet) builds must reject a
+// caller-supplied claim of mainnet attestation, symmetric with the existing
+// mainnet-build rejection of AnchorMode::Simulated.
+#[cfg(not(feature = "mainnet"))]
+#[test]
+fn attested_mainnet_rejected_on_non_mainnet_build() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let (instruction, _) = build_register_claim(
+        &context.authority,
+        registry_config,
+        [130; 32],
+        [131; 32],
+        [132; 32],
+        2,
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "AnchorModeNotAllowed", 6002);
+}
+
+// AnchorMode::AttestedDevnet = 1. Mainnet builds must reject a caller-supplied
+// claim of devnet attestation, symmetric with attested_mainnet_rejected_on_non_mainnet_build.
+#[cfg(feature = "mainnet")]
+#[test]
+fn attested_devnet_rejected_on_mainnet_build() {
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let (instruction, _) = build_register_claim(
+        &context.authority,
+        registry_config,
+        [133; 32],
+        [134; 32],
+        [135; 32],
+        1,
+    );
+
+    let error =
+        send_instruction_result(&mut context.svm, instruction, &context.authority).unwrap_err();
+
+    assert_anchor_error(&error, "AnchorModeNotAllowed", 6002);
+}
+
 #[test]
 fn unknown_anchor_mode_rejected() {
     let mut context = setup();

@@ -20,15 +20,17 @@ This brief covers the PlotArmor Anchor program implementing the v1 instruction s
 
 **Manual review:** Conducted against the white paper spec, Appendix C invariants, and Appendix G acceptance checklist.
 
-**Test coverage — 74 tests total, all passing as of commit `c40f09a`:**
+**Test coverage — 75 tests total per build (devnet build + TypeScript), 45 Rust tests on a mainnet-featured build; all passing as of commit `<uncommitted, pending review — see Finding 1 note below>`, superseding the `c40f09a` count below:**
 
-Layer 1 (Rust/LiteSVM, 44 tests: 1 unit test in `src/lib.rs` + 43 integration tests in `programs/plotarmor/tests/`):
+Layer 1 (Rust/LiteSVM, 45 tests per build: 1 unit test in `src/lib.rs` + 44 integration tests in `programs/plotarmor/tests/`; one test in `security_tests.rs` is build-specific, so the total is 45 on both the devnet default build and a `--features mainnet` build, not 46):
 - `happy_paths.rs`: 11 tests — all instructions, content-addressing convergence, chained versions, chain reuse, reserved-field enforcement
-- `security_tests.rs`: 32 tests — all error codes, atomicity, PDA collision, cross-claim rejections, enum boundary values
+- `security_tests.rs`: 33 tests — all error codes, atomicity, PDA collision, cross-claim rejections, enum boundary values, symmetric mainnet/devnet mode-rejection (Finding 1, see below)
 
 Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
 - 14 happy-path tests with on-chain state assertions across all six instructions
 - 16 rejection tests confirming every error code path
+
+*Prior count (`c40f09a`): 74 tests (44 Rust + 30 TypeScript). The 2026-07-03 Finding 1 fix added one build-specific LiteSVM test per build, bringing the per-build Rust total to 45.*
 
 **Devnet scenario suite** (`scripts/measure_devnet.ts`): 24 scenarios (1-7, 9-24; scenario 8 intentionally merged into scenario 6) — positive measurements and adversarial edge cases. All pass. Script exits non-zero on any failure.
 
@@ -60,7 +62,7 @@ Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
 |---|---|---|
 | 6000 | `AlreadyInitialized` | Reserved; not emitted by v1 handlers (`is_initialized` guard used instead) |
 | 6001 | `StaleLineageHead` | TypeScript: stale link; two-instruction atomic revert confirmed via on-chain fetch |
-| 6002 | `AnchorModeNotAllowed` | TypeScript: `content_kind=99`, `content_kind=255`, `claim_kind=99` |
+| 6002 | `AnchorModeNotAllowed` | TypeScript: `content_kind=99`, `content_kind=255`, `claim_kind=99`. As of 2026-07-03 (Finding 1, see §7), also emitted for a symmetric environment mismatch: a mainnet-featured build rejects `anchor_mode_arg = AttestedDevnet`, and a non-mainnet build rejects `anchor_mode_arg = AttestedMainnet`. Verified by LiteSVM: `attested_devnet_rejected_on_mainnet_build` (mainnet-feature-gated), `attested_mainnet_rejected_on_non_mainnet_build` (default build). |
 | 6003 | `SimulatedModeRejected` | Mainnet-feature-gated; not testable on devnet by design. Verified by LiteSVM: `cargo test --features mainnet`, `simulated_mode_rejected_on_mainnet_build`. (A build-tooling gap previously made this test load a stale non-mainnet `.so` regardless of the `--features mainnet` flag, correctly failing since the rejection logic was never compiled in; fixed 2026-07-01 by building a distinct mainnet-featured artifact — see `programs/plotarmor/tests/common/mod.rs`.) |
 | 6004 | `ShareOverflow` | LiteSVM Rust tests |
 | 6005 | `ShareSumMismatch` | TypeScript: `total=0`, `threshold>total`, `add_owner share=0`, `threshold=0`, `threshold>new_total` |
@@ -125,11 +127,18 @@ A negligent admin could set threshold = 1, nullifying multi-party protection. Ac
 **E. `add_version` checks claimant signature only, not threshold approval**
 White paper sections D.2 and 15.6 describe threshold approval for version advancement. The deployed implementation checks `signer == work_claim.claimant`. Matches v1 single-claimant flows. Full threshold requires the custody-model decision. This is a documented deviation, not a hidden gap.
 
+**Finding 1 (resolved 2026-07-03): `anchor_mode_arg` was caller-controlled with no environment cross-check**
+Prior to this fix, `assert_mode_allowed` (`programs/plotarmor/src/helpers.rs`) only rejected `AnchorMode::Simulated` on mainnet-featured builds. A caller could pass `anchor_mode_arg = AttestedMainnet` on a devnet build, or `AttestedDevnet` on a mainnet build, with no on-chain check catching the mismatch. Decided in Claude Chat 2026-07-03 (Option 1): extend the existing feature-gated rejection pattern symmetrically rather than leave it caller-controlled or document it as accepted risk. Mainnet builds now also reject `AttestedDevnet`; non-mainnet builds now reject `AttestedMainnet`. Both paths reuse error code `AnchorModeNotAllowed` (6002) rather than adding a new code, since 6002 already covers "mode not permitted in this context" for both invalid enum values and registry-config-gated modes; error codes 6000-6010 are treated as a fixed range in this project.
+Verification status: 4 passes completed — (1) live `cargo test` on the default (devnet) build against a freshly rebuilt `.so`, 45/45 passing including the new `attested_mainnet_rejected_on_non_mainnet_build` test; (2) live `cargo test --features mainnet` against a freshly rebuilt mainnet-featured `.so` (`target/deploy-mainnet/plotarmor.so`, rebuilt via `cargo build-sbf`), 45/45 passing including `attested_devnet_rejected_on_mainnet_build` and the pre-existing `simulated_mode_rejected_on_mainnet_build`; (3) live `anchor test` (TypeScript/Mocha, local validator, a distinct execution harness from LiteSVM), 30/30 passing, confirming no regression to devnet-path behavior; (4) independent re-audit by a separate agent session with no access to this session's reasoning, which read the diff and the modified source files directly and signed off on cfg symmetry, blast radius, test correctness, and error-code reuse.
+Not yet verified: an actual devnet deployment of this fix. The change alters compiled program behavior; per instruction, it is **not deployed to devnet** and awaits an explicit human go-ahead before redeploy. Until redeployed, the live devnet program still has the pre-fix (asymmetric) behavior. This diff is also **not yet committed** to git as of this writing.
+
 ---
 
 ## 8. Implementation detail for auditors
 
 `register_work_claim` sets the initial `OwnerRecord.role = 0` (Unspecified). The white paper does not specify the initial role value for the registering claimant. If Author attribution is contractually required, it must be set via a subsequent `add_owner` call. This is not an error but should be reflected in client-side UX and onboarding documentation.
+
+`ContentArtifact.content_kind` is set once, by whichever caller first initializes a given `raw_hash` (the `is_initialized` guard). A later caller reusing the same hash with a different `content_kind` succeeds without error and does not change the stored value. This is a shared-artifact data integrity quirk, not a security issue: clients must not assume the stored `content_kind` matches their own submission when the artifact already existed. Surfaced by the 2026-07-03 architecture review; behaviorally verified once via LiteSVM on 2026-07-03 (2 verification passes total, provisional until the 4-pass standard is met).
 
 ---
 
@@ -147,8 +156,9 @@ Per the white paper, auditor review should cover Appendix C (invariants) and App
 - The `StaleLineageHead` check logic in `add_version` (anti-fork guarantee)
 - The `assert_mode_allowed` helper and its relationship to `RegistryConfig.enabled_anchor_modes`
 - The mainnet `SimulatedModeRejected` compile-time rejection (`--features mainnet`, not testable on devnet by design)
+- The new symmetric `AttestedDevnet`/`AttestedMainnet` environment-mismatch rejection (Finding 1, §7) — same compile-time-gated pattern, same untestable-on-devnet-by-design caveat until redeployed
 - Limitations A-E above in the context of the case-study threat model
 
 ---
 
-*Prepared: June 2026; test-count, scenario-count, and build-tooling corrections applied 2026-07-01. Program commit: `c40f09a`. All 74 tests passing. Demo repo commit: `f6f82e0`. IPFS wiring complete.*
+*Prepared: June 2026; test-count, scenario-count, and build-tooling corrections applied 2026-07-01. Program commit as of that date: `c40f09a`, 74 tests passing. Finding 1 fix (2026-07-03) is source-complete and locally verified (4 passes, see §7) but **uncommitted and not deployed to devnet** as of this writing — live devnet program still reflects `c40f09a` behavior. Demo repo commit: `f6f82e0`. IPFS wiring complete.*

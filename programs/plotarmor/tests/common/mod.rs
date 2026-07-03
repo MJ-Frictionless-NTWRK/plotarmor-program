@@ -14,7 +14,14 @@ use {
 };
 
 const TEST_KEYPAIR_LAMPORTS: u64 = 10_000_000_000;
+// Fixtures need a mode that's actually accepted on the build under test. Mainnet
+// builds now reject AttestedDevnet (see helpers.rs symmetric environment gate),
+// so mainnet-featured test runs must use AttestedMainnet=2 instead of the
+// devnet default AttestedDevnet=1.
+#[cfg(not(feature = "mainnet"))]
 pub const ANCHOR_MODE: u8 = 1;
+#[cfg(feature = "mainnet")]
+pub const ANCHOR_MODE: u8 = 2;
 
 pub struct TestContext {
     pub svm: LiteSVM,

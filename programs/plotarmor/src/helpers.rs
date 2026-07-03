@@ -14,6 +14,21 @@ pub fn assert_mode_allowed(anchor_mode_arg: u8, registry_config: &RegistryConfig
     #[cfg(feature = "mainnet")]
     require!(mode != AnchorMode::Simulated, PlotArmorError::SimulatedModeRejected);
 
+    // Symmetric environment gate: a build compiled for one network must not
+    // accept an anchor_mode_arg asserting the other network's attestation.
+    // Decided 2026-07-03 in Claude Chat (Option 1): extend the existing
+    // feature-gated rejection pattern rather than leaving this caller-controlled.
+    #[cfg(feature = "mainnet")]
+    require!(
+        mode != AnchorMode::AttestedDevnet,
+        PlotArmorError::AnchorModeNotAllowed
+    );
+    #[cfg(not(feature = "mainnet"))]
+    require!(
+        mode != AnchorMode::AttestedMainnet,
+        PlotArmorError::AnchorModeNotAllowed
+    );
+
     match mode {
         AnchorMode::UserSigned => {
             require!(
