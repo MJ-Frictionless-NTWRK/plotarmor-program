@@ -307,11 +307,15 @@ AttestedDevnet on a mainnet build, with nothing catching the mismatch. Decided i
 Chat 2026-07-03 (Option 1): extend the existing feature-gated rejection pattern
 symmetrically. Mainnet builds now also reject AttestedDevnet; non-mainnet builds now
 reject AttestedMainnet. Both reuse error code AnchorModeNotAllowed (6002), not a new
-code. See AUDITOR_BRIEF.md section 7 for full verification detail (4 passes: two live
+code. See AUDITOR_BRIEF.md section 7 for full verification detail (5 passes: two live
 cargo test runs against freshly rebuilt .so artifacts for each feature set, one live
-anchor test run, one independent agent re-audit). Fix is source-complete and locally
-verified but UNCOMMITTED and NOT DEPLOYED to devnet as of this writing; redeploy is a
-pending decision point, not automatic.
+anchor test run, one independent agent re-audit, one live devnet check against the
+redeployed program itself via scripts/finding1_live_check.ts). Committed as 3bf2ac3
+and DEPLOYED to devnet 2026-07-03 (upgrade tx
+4zrHzvCEstu991QtUeLLU9QkZFxX1jHLuKA27KBAHMY5m7qU6sWdoXjPUsgiiTZvvKTVwdPwQ3GqfqYfzi37pExD).
+The program account needed a one-time `solana program extend` (+10240 bytes) before the
+upgrade fit; mechanical Solana CLI requirement (ExtendProgram minimum increment), not a
+program-logic change.
 
 Implementation detail (not a limitation): register_work_claim sets initial OwnerRecord.role = 0 (Unspecified). If Author attribution is required, it must be set via a subsequent add_owner call.
 
@@ -324,12 +328,11 @@ against Appendix C invariants and Appendix G acceptance checklist specifically.
 Two suites run against the deployed program, totaling 74 tests as of commit c40f09a: 44
 Rust/LiteSVM and 30 TypeScript/Mocha (local validator). All 74 pass as of that commit.
 
-As of the (uncommitted) 2026-07-03 Finding 1 fix: Rust/LiteSVM is 45 tests per build (one
-test in security_tests.rs is build-specific: devnet default build runs
-attested_mainnet_rejected_on_non_mainnet_build, mainnet-featured build runs
+As of the 2026-07-03 Finding 1 fix (commit 3bf2ac3, deployed to devnet): Rust/LiteSVM is
+45 tests per build (one test in security_tests.rs is build-specific: devnet default build
+runs attested_mainnet_rejected_on_non_mainnet_build, mainnet-featured build runs
 attested_devnet_rejected_on_mainnet_build instead). TypeScript/Mocha remains 30, unaffected.
-Combined per-build total: 75. Verified locally (see AUDITOR_BRIEF.md section 7); not yet
-reflected in a commit or a devnet deployment.
+Combined per-build total: 75. See AUDITOR_BRIEF.md section 7 for full verification detail.
 
 Invariants confirmed green by TypeScript on-chain assertions:
 - latest_link.content_artifact == latest_artifact after every chain-touching tx
@@ -404,6 +407,10 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
 - `devnet_ext_ref_hash_test.ts` — 14 adversarial scenarios across all 4 instructions:
   realistic CIDv0 digest, all-ones boundary, invalid contract_kind=99, invalid anchor_mode_arg=99.
   All 14 pass on live devnet.
+- `finding1_live_check.ts` — one-off (not part of the permanent suite) live verification
+  that the redeployed devnet program rejects anchor_mode_arg=AttestedMainnet(2) with
+  AnchorModeNotAllowed(6002) and still accepts AttestedDevnet(1). Run 2026-07-03 against
+  commit 3bf2ac3, both scenarios passed.
 
 ## external_ref_hash — full coverage summary
 - All 4 anchoring instructions accept and store external_ref_hash: [u8; 32]
