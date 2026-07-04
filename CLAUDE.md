@@ -184,6 +184,17 @@ pub struct AnchorRecord {             // ~82 bytes; carries NO lifecycle state
 
 ## Hashing (three layers)
 - Layer 1 raw hash: SHA-256("plotarmor:raw:v1\n" || raw_bytes). On-chain identity. Seeds ContentArtifact.
+- Layer 1 contract raw hash (white paper v2.84, Section 5.6/8.6, corrected 2026-07-04):
+  SHA-256("plotarmor:contract_raw:v1\n" || raw_bytes). On-chain identity. Seeds ContractArtifact
+  (raw_contract_hash). raw_bytes are the actual rendered contract document (e.g. PDF), generated
+  ONCE at finalization time and never re-rendered/re-hashed, parallel to how ContentArtifact works
+  for screenplays. Do NOT hash canonical JSON of form fields (title/description/parties/etc.) --
+  that is a different problem (Layer 2) and produces the wrong on-chain identity. An earlier
+  correction of this file/session used "plotarmor:contract:v1\n" and canonical-JSON hashing; both
+  were wrong and were never actually implemented on-chain or in the demo repo before this
+  correction landed.
+- "plotarmor:contract:v1\n" (no "_raw") is reserved for a DIFFERENT, off-chain Layer 2 canonical-
+  text hash used by the Rights Index. Do not conflate the two prefixes.
 - Layer 2 canonical hash: client-side, BEFORE encryption. Off-chain. Index identity-comparison key.
 - Layer 3 similarity fingerprint: off-chain, client-side or deferred. Not part of canon.
 - storage_hash: SHA-256 of canonical CID. Off-chain operational metadata only. NOT on-chain, NOT a seed.
