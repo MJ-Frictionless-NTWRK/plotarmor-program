@@ -121,7 +121,15 @@ pub struct OwnerRecord {              // ~75 bytes
 pub struct ContractArtifact {         // ~50 bytes
     pub is_initialized: bool,         // init guard; set once on first init, blocks field overwrite on repeat
     pub raw_hash: [u8; 32],
-    pub content_kind: u8,
+    pub content_kind: u8,             // CONFIRMED SPEC DEVIATION 2026-07-04: white paper Section 8.6 /
+                                       // Appendix B.1 name this field contract_kind. Deployed field is
+                                       // content_kind (camelCase contentKind in IDL/TS), almost certainly
+                                       // copy-pasted from ContentArtifact's own field and never renamed.
+                                       // The anchor_evidence_contract/anchor_authorized_contract
+                                       // INSTRUCTION ARGUMENT is correctly named contract_kind (contractKind
+                                       // in TS) and matches the white paper -- only the ACCOUNT STRUCT FIELD
+                                       // that stores it deviates. Do not silently rename; a field rename
+                                       // requires a program redeploy. See Known v1 limitations, item F.
     pub created_at: i64,
 }
 pub struct EvidenceAnchor {           // ~112 bytes; unilateral
@@ -327,6 +335,24 @@ and DEPLOYED to devnet 2026-07-03 (upgrade tx
 The program account needed a one-time `solana program extend` (+10240 bytes) before the
 upgrade fit; mechanical Solana CLI requirement (ExtendProgram minimum increment), not a
 program-logic change.
+
+F. CONFIRMED SPEC DEVIATION 2026-07-04: ContractArtifact's kind field is named
+   content_kind in the deployed program (state.rs, IDL, generated TS client:
+   contentKind), but the white paper (Section 8.6, Appendix B.1) names this field
+   contract_kind for ContractArtifact. Almost certainly copy-pasted from
+   ContentArtifact's own (correctly-named) content_kind field and never renamed
+   when ContractArtifact was added. This does NOT affect the instruction argument:
+   anchor_evidence_contract/anchor_authorized_contract's contract_kind argument
+   (contractKind in TS) is correctly named and matches the white paper -- only the
+   ACCOUNT STRUCT FIELD that stores the value on-chain deviates. Confirmed live via
+   `grep -n "struct ContractArtifact" -A6 programs/plotarmor/src/state.rs` and the
+   generated IDL/TS types (target/idl/plotarmor.json, target/types/plotarmor.ts).
+   Not fixed here: renaming a Rust struct field requires a program redeploy
+   (field names are not part of Borsh account serialization/layout, so a rename
+   is non-breaking to existing on-chain data, but still requires recompiling and
+   upgrading the deployed program). Flag any further work touching this field
+   with COME TO CLAUDE CHAT if a rename is ever considered, since it touches a
+   locked account struct per this file's hard rules.
 
 Implementation detail (not a limitation): register_work_claim sets initial OwnerRecord.role = 0 (Unspecified). If Author attribution is required, it must be set via a subsequent add_owner call.
 
