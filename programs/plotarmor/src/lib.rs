@@ -26,6 +26,9 @@ pub use instructions::InitRegistryConfig;
 #[allow(unused_imports)]
 use instructions::register_work_claim::__client_accounts_register_work_claim;
 pub use instructions::RegisterWorkClaim;
+#[allow(unused_imports)]
+use instructions::sign_contract::__client_accounts_sign_contract;
+pub use instructions::SignContract;
 pub use state::*;
 
 declare_id!("3h9CzV9MJDeD5yjhVhdE6cupuXVRnLW1Cu6P14EJBKv2");
@@ -131,5 +134,12 @@ pub mod plotarmor {
             anchor_mode_arg,
             external_ref_hash,
         )
+    }
+
+    pub fn sign_contract(
+        ctx: Context<SignContract>,
+        content_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::sign_contract::handler(ctx, content_hash)
     }
 }

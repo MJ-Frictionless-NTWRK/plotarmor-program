@@ -24,6 +24,8 @@ pub enum PlotArmorError {
     Unauthorized,
     #[msg("Work claim has been superseded")]
     SupersededClaim,
+    #[msg("Provided content hash does not match the on-chain contract artifact")]
+    ContentHashMismatch,
     // Reserved error codes (unused in v1, reserved for future use):
     // AlreadyInitialized (6000) - reserved; is_initialized guard currently
     //   returns account-exists error via Anchor before this triggers.

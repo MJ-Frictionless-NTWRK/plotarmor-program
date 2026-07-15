@@ -126,6 +126,26 @@ impl AuthorizedContractAnchor {
     pub const LEN: usize = 8 + 32 + 32 + 8;
 }
 
+// ContractSignature — ["signature", contract_artifact_pda, signer_pubkey] — ~113 bytes
+// One PDA per (contract, signer) pair. `init` (not init_if_needed): a second
+// signature attempt by the same signer on the same contract hits the
+// account-already-exists path and fails, which is the correct anti-double-sign
+// behavior. signed_at/slot are captured on-chain via Clock::get() in the
+// handler, never accepted as a client-supplied argument (see sign_contract.rs).
+#[account]
+pub struct ContractSignature {
+    pub contract_artifact: Pubkey,
+    pub signer: Pubkey,
+    pub content_hash: [u8; 32],
+    pub signed_at: i64,
+    pub slot: u64,
+    pub bump: u8,
+}
+
+impl ContractSignature {
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 8 + 8 + 1;
+}
+
 // AnchorRecord — ["anchor", anchored_object_pda, anchor_nonce] — ~82 bytes
 #[account]
 pub struct AnchorRecord {
