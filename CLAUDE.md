@@ -180,9 +180,16 @@ pub struct AnchorRecord {             // ~82 bytes; carries NO lifecycle state
 - AnchorRecord created ONLY for externally meaningful events: WorkClaim registration, version add,
   EvidenceAnchor, AuthorizedContractAnchor. NOT for Ownership or OwnerRecord init.
 - anchor_mode immutable per AnchorRecord; re-anchor = new AnchorRecord with new nonce
-- No close instruction for ContentArtifact, ClaimArtifactLink, EvidenceAnchor,
-  AuthorizedContractAnchor, AnchorRecord. OwnerRecord closeable only via governed ownership change.
-  WorkClaim closure unsupported in v1.
+- No close instruction exists in v1 for ANY account -- ContentArtifact, ClaimArtifactLink,
+  EvidenceAnchor, AuthorizedContractAnchor, AnchorRecord, OwnerRecord, or WorkClaim. Corrected
+  2026-07-15: this line previously read "OwnerRecord closeable only via governed ownership
+  change," which is not true of the current v1 program (grepped: zero `close =` constraints
+  anywhere in programs/plotarmor/src/instructions/). That wording comes from white paper
+  Appendix G.7's mainnet-readiness acceptance checklist, which states the closure policy a
+  FUTURE close instruction must satisfy once one is built -- it is a target constraint on
+  implementation, not a description of current behavior. Read it as: when an OwnerRecord close
+  instruction is eventually added, it must require governed ownership change, not be added as
+  an unrestricted close. WorkClaim closure remains unsupported by design in v1.
 
 ## Simulated-mode rejection (security-critical)
 - Mainnet builds compile with a `mainnet` Cargo feature that hardcodes rejection of
@@ -354,7 +361,160 @@ F. CONFIRMED SPEC DEVIATION 2026-07-04: ContractArtifact's kind field is named
    with COME TO CLAUDE CHAT if a rename is ever considered, since it touches a
    locked account struct per this file's hard rules.
 
+G. ContractSignature.content_hash naming, confirmed correct 2026-07-15: verified against
+   the literal struct definition in state.rs (`grep -n "struct ContractSignature" -A6
+   programs/plotarmor/src/state.rs`) that the field is named content_hash, matching
+   sign_contract-spec.md Section 2 exactly -- no deviation, no rename needed. This differs
+   from ContractArtifact's own hash field name (raw_hash); the difference is NOT an
+   intentional distinction between the two structs -- it reflects an earlier spec draft,
+   not a deliberate design choice. Do not read design intent into the naming difference.
+   is_initialized was deliberately omitted from ContractSignature: that flag exists only to
+   guard init_if_needed accounts (ContentArtifact, ContractArtifact) against a second
+   overwriting init call. ContractSignature uses plain init (per spec, confirmed in
+   sign_contract.rs), so Anchor's own account-already-exists check at the runtime level
+   already rejects a second signature attempt -- there is no second init call to guard
+   against, so the flag would be dead weight. This matches the existing convention: every
+   other init-only account in the program (WorkClaim, Ownership, OwnerRecord,
+   ClaimArtifactLink, EvidenceAnchor, AuthorizedContractAnchor, AnchorRecord) also has no
+   is_initialized field; only the two init_if_needed accounts do.
+
 Implementation detail (not a limitation): register_work_claim sets initial OwnerRecord.role = 0 (Unspecified). If Author attribution is required, it must be set via a subsequent add_owner call.
+
+UNVERIFIED CLAIM, flagged 2026-07-15: the line below ("confirmed clean by the Solana MCP
+program_autofixer") has been in this file since its first commit (3e9cfa9, 2026-06-11) with
+no reconstructable record of it ever actually running. No tool named program_autofixer is
+discoverable in this project's toolset, and this project directory (plotarmor-program) has
+no MCP server configured at all (empty mcpServers entry). A real Solana MCP server
+(solana-mcp / solana-mcp-server, https://mcp.solana.com/mcp) is configured for two sibling
+project paths (/home/sucka/plotarmor, /home/sucka/plotarmor/plotarmor), but that is a
+different project directory, was not connected in the session that investigated this, and
+there is no evidence a tool called program_autofixer exists on it or was ever invoked. Per
+this file's own Verification standard, do not treat the sentence below as a completed audit
+pass. Do not cite it as evidence of anything until someone produces an actual transcript or
+tool output showing this check ran.
+
+REAL RUN, 2026-07-15 (this note is additional evidence; it does not replace the flag above --
+the ORIGINAL 2026-06-11 claim was still never backed by a real run, per the transcript search
+documented in that flag): the solana-mcp server (https://mcp.solana.com/mcp) was registered
+to this project directory via `claude mcp add --transport http solana-mcp
+https://mcp.solana.com/mcp` and confirmed connected (`claude mcp list`). A session restart
+was needed for tools to become visible; even after restart and a stable "Connected" health
+check, Claude Code's own tool index for this session never surfaced any solana-mcp tools
+(confirmed via repeated ToolSearch calls for the exact tool names). Rather than requesting a
+third restart, the live server was queried directly over its own JSON-RPC/HTTP protocol
+(the same protocol the native tool wiring uses), which is a real call to the real server,
+not a simulation.
+
+`tools/list` against the live server confirmed 5 tools exist, exact current names and
+descriptions: `list_sections` (catalogue of Solana doc sources), `get_documentation`
+(fetch full docs by source/section id), `Solana_Documentation_Search` (semantic RAG search),
+`Solana_Expert__Ask_For_Help` (RAG Q&A framed for debugging), and `program_autofixer`
+("Static security linter for Solana program Rust (Pinocchio + Anchor). Returns issues (with
+stable `fingerprint`), suggestions, detected framework, `false_positive_hints`... and
+`require_another_tool_call_after_fixing`."). program_autofixer is real and current --
+the original 2026-06-11 claim named a tool that does in fact exist, even though that
+specific claim was never shown to have actually been run.
+
+program_autofixer was called for real via `tools/call` against all 14 .rs files under
+programs/plotarmor/src (constants.rs, error.rs, helpers.rs, instructions.rs, lib.rs,
+modes.rs, state.rs, and all 7 files under instructions/, INCLUDING sign_contract.rs, which
+did not exist in June), concatenated to 43,713 bytes, framework hint "anchor". Full actual
+response:
+`{"issues":[],"suggestions":[],"framework_detected":"anchor","false_positive_hints":{},
+"require_another_tool_call_after_fixing":false}`
+-- zero issues, framework correctly detected, no further pass required.
+
+Because an all-clear result is exactly the failure mode this whole investigation started
+from, the tool was sanity-checked before trusting that output: a deliberately broken Anchor
+snippet (unchecked balance subtraction, an `AccountInfo` field opting out of typed
+validation) was submitted the same way. It correctly returned 3 issues (2 medium
+unchecked-arithmetic, 1 low anchor-unchecked-account) with real rule names, locations,
+descriptions, suggestions, and `require_another_tool_call_after_fixing: true`. This confirms
+the tool is genuinely functioning, not returning an empty stub -- the clean result on the
+real program above is a real finding, not a broken response.
+
+Scope note: this checks mechanical/security lint patterns only (unchecked arithmetic,
+untyped account fields, similar static rules). It says nothing about the business-logic
+gaps already identified independently in this file (Known v1 Limitations A, D, E; the
+Appendix C.6/C.10 threshold-enforcement gap) -- those are design decisions, not the kind of
+issue this linter class checks for, and it correctly did not flag them.
+
+ROOT CAUSE FOUND, 2026-07-15 -- why the native tool call needed a workaround at all: this
+is a known, currently unresolved Claude Code bug, not a problem with this project's MCP
+config. `claude mcp list` reported solana-mcp as "Connected" (stable across repeated
+checks), yet `ToolSearch` for "program_autofixer", "solana-mcp", "solana", and "anchor
+security" all returned "No matching deferred tools found" in the interactive session,
+including after a full session restart. Byte-for-byte config comparison across all three
+project directories ruled out scope/setup: this project's entry
+(`{"type": "http", "url": "https://mcp.solana.com/mcp"}` under key "solana-mcp") is
+structurally identical to /home/sucka/plotarmor's working entry -- not a config mistake.
+
+Running `claude -p "..." --debug --debug-file <path>` (one-shot, non-interactive) surfaced
+the actual mechanism: Claude Code loads a baseline pool of "deferred tools" at process start
+(logged as "Dynamic tool loading: 0/20 deferred tools included"), and MCP-provided tools are
+merged into that pool ASYNCHRONOUSLY sometime after -- a first one-shot process with a
+generic prompt saw the pool stay at 20 (solana-mcp's 5 tools never merged in before the
+process exited). A second one-shot process, given a prompt naming program_autofixer
+explicitly, logged `ToolSearchTool: cache invalidated - deferred tools changed` followed
+immediately by `ToolSearchTool: keyword search for "program_autofixer", found 1 matches`,
+then `Dynamic tool loading: 1/25 deferred tools included` -- the pool grew from 20 to 25
+(solana-mcp's 5 tools arrived) between process start and that ToolSearch call, and the
+model successfully reached a real permission prompt for `mcp__solana-mcp__program_autofixer`
+(denied only because `-p` mode has no TTY to approve it, not because the tool wasn't found).
+
+This means: the deferred-tool pool merge is a real, working mechanism that CAN and DID
+succeed within a single short-lived process. In the long-running interactive session used
+for this whole investigation (including the one that followed the task-3b restart), that
+merge evidently never landed during ToolSearch's lifetime, and nothing later re-triggers it
+-- `claude mcp list`'s ongoing "Connected" health check is a different, lighter check than
+the one-time pool-merge and does not reflect whether the merge succeeded.
+
+CORRECTED 2026-07-15 (second pass): all 7 candidate anthropics/claude-code GitHub issues were
+individually fetched and checked, not assumed from title alone. All 7 are CLOSED (not "open" --
+an earlier draft of this note wrongly said "currently open," caught and fixed here). Of the 7,
+only two are actual matches to this project's specific symptom (Connected via `claude mcp
+list`, ToolSearch finds nothing, persists across restart, generic locally-configured HTTP
+server): #39167 ("MCP server tools not exposed in session despite server responding
+correctly," closed with no visible fix) and #38245 ("MCP server tools discovered but not
+accessible via ToolSearch," closed as duplicate, no visible fix). The other five are real,
+verified-to-exist bugs in the same general MCP/ToolSearch subsystem but describe DISTINCT
+failure modes, not this one: #40314 is the opposite problem (HTTP tools loaded upfront,
+un-deferred, causing token bloat -- not invisibility), closed as not planned; #25894 is
+scoped specifically to the `mcp-remote` proxy tool, closed as duplicate; #60052 is about an
+`InputValidationError` on first call AFTER the tool is found by ToolSearch, not tools never
+being found, closed as duplicate; #55914 is scoped specifically to claude.ai-namespaced
+remote connectors (Notion, Gmail, etc.), where the reporter states locally-configured
+servers in the same session load fine, closed as duplicate; #42148 describes a closely
+related mechanism (deferred-tool list frozen while MCP is "still connecting") but claims a
+new user turn resolves it, which does not match what was observed here (many separate turns
+across an extended session never recovered), closed as not planned. Do not cite the full
+list of 7 as one undifferentiated "matching cluster" -- only #39167 and #38245 actually are.
+
+Not fixable from this project's side -- it is client-side timing/caching behavior in the
+Claude Code binary itself, not a settings or scope error. Workaround: `scripts/check_program_autofixer.sh`
+concatenates every `.rs` file under `programs/plotarmor/src` and POSTs it directly to
+`https://mcp.solana.com/mcp` over the same JSON-RPC/HTTP protocol Claude Code's own MCP
+client uses -- a real call to the real tool, not a simulation, and it does not depend on
+ToolSearch or native tool-calling working at all. Treat this as the durable path for running
+program_autofixer going forward; do not spend further time trying to make the native path
+work in an interactive session before checking this file first. A brand new interactive
+session MIGHT succeed if its process start happens to land after the async merge completes
+(as the one-shot tests showed is possible) -- but this is not guaranteed, and the script
+works regardless.
+
+Script confirmed usable going forward, checked 2026-07-15 (second pass, not just
+demonstrated once): committed to git as a standalone file (commit 25db31f, "1 file changed,
+74 insertions", not bundled with any other pending change); executable (mode 100755,
+preserved through the commit); re-run independently from a fresh `bash -c` subshell
+(different PID) and produced the byte-identical clean result; separately re-run with cwd set
+to `/tmp` and invoked by full path to confirm `REPO_ROOT`/`SRC_DIR` resolution depends on the
+script's own location (`${BASH_SOURCE[0]}`), not on cwd -- also byte-identical. Prerequisites
+(curl, python3) are documented in the script's own header comment (line 14), which is the
+only reachable place they are documented: a file named
+`plotarmor-program-PRE_DEPLOY_CHECKLIST.md`, referenced as if it already existed and cross-
+referenced this script, does NOT exist anywhere in this repo or elsewhere on this machine
+(checked via `find`) -- if that checklist is meant to exist, it has not been created yet;
+do not assume it does without checking again.
 
 These findings were confirmed clean by the Solana MCP program_autofixer (zero mechanical
 issues) and identified by manual review against the spec. Prague auditors should review
