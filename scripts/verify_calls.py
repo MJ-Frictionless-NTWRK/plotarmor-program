@@ -15,6 +15,7 @@ Expected argument counts (including the new trailing external_ref_hash):
                                  external_ref_hash)
   anchorAuthorizedContract: 5  (raw_contract_hash, contract_kind, anchor_nonce,
                                  anchor_mode_arg, external_ref_hash)
+  signContract:             1  (content_hash)
 """
 import os
 import re
@@ -25,6 +26,7 @@ EXPECTED = {
     "addVersion": 7,
     "anchorEvidenceContract": 6,
     "anchorAuthorizedContract": 5,
+    "signContract": 1,
 }
 
 def check_file(path):

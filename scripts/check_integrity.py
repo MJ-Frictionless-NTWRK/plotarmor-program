@@ -13,6 +13,7 @@ Expected argument counts:
   addVersion:               7
   anchorEvidenceContract:   6
   anchorAuthorizedContract: 5
+  signContract:             1
 
 Usage:
   python3 check_integrity.py <path_to_ts_file>
@@ -28,6 +29,7 @@ EXPECTED_ARGS = {
     "addVersion": 7,
     "anchorEvidenceContract": 6,
     "anchorAuthorizedContract": 5,
+    "signContract": 1,
 }
 
 TERMINATORS = [".rpc(", ".instruction(", ".transaction(", ".simulate("]

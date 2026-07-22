@@ -10,7 +10,7 @@
 
 ## 1. Scope
 
-This brief covers the PlotArmor Anchor program implementing the v1 instruction set: `register_work_claim`, `add_version`, `add_owner`, `anchor_evidence_contract`, `anchor_authorized_contract`, and `init_registry_config`. Year-two instructions (WorkMetadata, WorkRelation) are reserved PDA seeds, not implemented.
+This brief covers the PlotArmor Anchor program implementing the v1 instruction set: `register_work_claim`, `add_version`, `add_owner`, `anchor_evidence_contract`, `anchor_authorized_contract`, `init_registry_config`, and `sign_contract` (added 2026-07-15, see §7). Year-two instructions (WorkMetadata, WorkRelation) are reserved PDA seeds, not implemented.
 
 ---
 
@@ -20,19 +20,23 @@ This brief covers the PlotArmor Anchor program implementing the v1 instruction s
 
 **Manual review:** Conducted against the white paper spec, Appendix C invariants, and Appendix G acceptance checklist.
 
-**Test coverage — 75 tests total per build (devnet build + TypeScript), 45 Rust tests on a mainnet-featured build; all passing as of commit `3bf2ac3`, superseding the `c40f09a` count below:**
+**Test coverage — 82 tests total per build (52 Rust + 30 TypeScript), all passing as of commit `09c5bfc`, superseding the `3bf2ac3` count below:**
 
-Layer 1 (Rust/LiteSVM, 45 tests per build: 1 unit test in `src/lib.rs` + 44 integration tests in `programs/plotarmor/tests/`; one test in `security_tests.rs` is build-specific, so the total is 45 on both the devnet default build and a `--features mainnet` build, not 46):
+Layer 1 (Rust/LiteSVM, 52 tests per build: 1 unit test in `src/lib.rs` + 51 integration tests in `programs/plotarmor/tests/`; one test in `security_tests.rs` is build-specific, so the total is 52 on both the devnet default build and a `--features mainnet` build):
 - `happy_paths.rs`: 11 tests — all instructions, content-addressing convergence, chained versions, chain reuse, reserved-field enforcement
 - `security_tests.rs`: 33 tests — all error codes, atomicity, PDA collision, cross-claim rejections, enum boundary values, symmetric mainnet/devnet mode-rejection (Finding 1, see below)
+- `sign_contract_tests.rs`: 7 tests (added 2026-07-15) — happy path, missing/nonexistent ContractArtifact, content_hash mismatch, double-sign-by-same-signer rejection, on-chain clock (not client-supplied) timestamp/slot, no-on-chain-creator-check confirmed (Option 2, see §7)
+Live-verified 2026-07-22 (1 of the 4-pass standard): both the devnet default build and `cargo test --features mainnet` ran 52/52 clean, after rebuilding `target/deploy-mainnet/plotarmor.so`, which had gone stale since the 2026-07-03 Finding 1 deploy and did not contain the `sign_contract` instruction — 6 of 7 `sign_contract_tests.rs` cases failed with `InstructionFallbackNotFound` against the stale binary before the rebuild. Build-artifact staleness, not a program-logic defect.
 
 Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
-- 14 happy-path tests with on-chain state assertions across all six instructions
+- 14 happy-path tests with on-chain state assertions across the original six instructions
 - 16 rejection tests confirming every error code path
+- `sign_contract` has NO Layer 2 (Mocha/local-validator) coverage yet. Its only coverage is Layer 1 above plus a single live-devnet happy-path script (`scripts/devnet_sign_contract_test.ts`, see §2 below). This is unstarted work, not an accepted gap.
 
-*Prior count (`c40f09a`): 74 tests (44 Rust + 30 TypeScript). The 2026-07-03 Finding 1 fix added one build-specific LiteSVM test per build, bringing the per-build Rust total to 45.*
+*Prior count (`3bf2ac3`): 75 tests per build (45 Rust + 30 TypeScript). The 2026-07-15 `sign_contract` addition added 7 Rust tests, bringing the per-build Rust total to 52 and the combined total to 82.*
+*Prior count (`c40f09a`): 74 tests (44 Rust + 30 TypeScript).*
 
-**Devnet scenario suite** (`scripts/measure_devnet.ts`): 24 scenarios (1-7, 9-24; scenario 8 intentionally merged into scenario 6) — positive measurements and adversarial edge cases. All pass. Script exits non-zero on any failure.
+**Devnet scenario suite** (`scripts/measure_devnet.ts`): 24 scenarios (1-7, 9-24; scenario 8 intentionally merged into scenario 6) — positive measurements and adversarial edge cases. All pass. Script exits non-zero on any failure. `measure_devnet.ts` does not cover `sign_contract`; see `scripts/devnet_sign_contract_test.ts` above for its separate, standalone devnet proof.
 
 ---
 
@@ -71,8 +75,9 @@ Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
 | 6008 | `Paused` | LiteSVM Rust tests |
 | 6009 | `Unauthorized` | TypeScript: wrong claimant on `add_version`; wrong admin on `anchor_authorized_contract` |
 | 6010 | `SupersededClaim` | LiteSVM Rust tests |
+| 6011 | `ContentHashMismatch` | Added 2026-07-15 with `sign_contract`. LiteSVM: `wrong_content_hash_rejected` in `sign_contract_tests.rs`. Not yet exercised live on devnet. |
 
-System Program `0x0` ("already in use") confirmed on: duplicate `OwnerRecord`, evidence replay, authorized contract PDA collision, `init_registry_config` second call.
+System Program `0x0` ("already in use") confirmed on: duplicate `OwnerRecord`, evidence replay, authorized contract PDA collision, `init_registry_config` second call, and (as of 2026-07-15) double-sign of the same `ContractSignature` PDA (`double_sign_by_same_signer_rejected`, LiteSVM only).
 
 ---
 
@@ -107,6 +112,7 @@ At $90/SOL reference price (June 2026):
 | Re-anchor (new `AnchorRecord` only) | AnchorRecord | ~$0.13 |
 | `add_owner` | OwnerRecord | ~$0.13 |
 | `init_registry_config` (one-time) | RegistryConfig | ~$0.11 |
+| `sign_contract` (added 2026-07-15) | ContractSignature | not yet measured — `devnet_sign_contract_test.ts` confirms the tx but does not compute a cost figure. ContractSignature is ~121 bytes, smaller than most anchored accounts, so expect a range similar to re-anchor/add-owner (~$0.13), but treat that as an estimate only until measured. |
 
 ---
 
@@ -132,6 +138,12 @@ Prior to this fix, `assert_mode_allowed` (`programs/plotarmor/src/helpers.rs`) o
 Verification status: 4 passes completed — (1) live `cargo test` on the default (devnet) build against a freshly rebuilt `.so`, 45/45 passing including the new `attested_mainnet_rejected_on_non_mainnet_build` test; (2) live `cargo test --features mainnet` against a freshly rebuilt mainnet-featured `.so` (`target/deploy-mainnet/plotarmor.so`, rebuilt via `cargo build-sbf`), 45/45 passing including `attested_devnet_rejected_on_mainnet_build` and the pre-existing `simulated_mode_rejected_on_mainnet_build`; (3) live `anchor test` (TypeScript/Mocha, local validator, a distinct execution harness from LiteSVM), 30/30 passing, confirming no regression to devnet-path behavior; (4) independent re-audit by a separate agent session with no access to this session's reasoning, which read the diff and the modified source files directly and signed off on cfg symmetry, blast radius, test correctness, and error-code reuse.
 **Deployed to devnet 2026-07-03**, commit `3bf2ac3`, upgrade tx `4zrHzvCEstu991QtUeLLU9QkZFxX1jHLuKA27KBAHMY5m7qU6sWdoXjPUsgiiTZvvKTVwdPwQ3GqfqYfzi37pExD`. The program account required a one-time `solana program extend` (+10240 bytes) before the upgrade would fit; this is a Solana CLI mechanical requirement (ExtendProgram must be called with a minimum 10240-byte increment), not a program-logic change.
 5th verification pass, live against the redeployed devnet program itself (not LiteSVM, not local validator): `scripts/finding1_live_check.ts` submitted two real `register_work_claim` transactions. `anchor_mode_arg = AttestedMainnet (2)` was rejected with `AnchorModeNotAllowed (6002)` as expected; `anchor_mode_arg = AttestedDevnet (1)` succeeded with no regression, confirmed tx `2cDLq1gWsDUMfKCtiHraGo6wCERv5eQ65SvQ5SmdhuJ8ji4MHVxVHBWPjKg5gNpxTMuAA91UUz2WT7wjQRqrCKhg`. Finding 1 is now fully resolved: source-complete, committed, deployed, and live-verified.
+
+**F. `sign_contract` — no on-chain creator/party authorization check (added 2026-07-15, Option 2, locked by Milan)**
+`sign_contract` records "this wallet signed this exact content hash at this on-chain time," not "the contract's creator or a listed party signed." `ContractArtifact` carries no creator/authority field (it is content-addressed and shared — any wallet's first call to `anchor_evidence_contract`/`anchor_authorized_contract` may have initialized a given hash), so there is no program-checked identity to restrict `signer` against. Any funded wallet can call `sign_contract` against any existing `ContractArtifact`. Creator/party restriction is enforced OFF-CHAIN only (Supabase/RLS gating which wallet the frontend will prompt to sign). Do not describe a `ContractSignature` as on-chain proof of *who* is a contractual party in UI or docs — only of *which wallet* signed *which content hash* *when*. The account structure (`ContractSignature`, one PDA per contract+signer pair) is intentionally shaped so a future on-chain party check can be added without a PDA redesign. See `sign_contract-spec.md` for the full design brief and locked decisions.
+
+**G. `sign_contract` timestamp is program-captured, not client-supplied**
+`signed_at` and `slot` come from `Clock::get()` inside the handler, never from an instruction argument. This is the load-bearing correctness property of the whole feature — a client-supplied timestamp would make "signed at this time" meaningless as evidence. Verified in LiteSVM (`signed_at_and_slot_come_from_onchain_clock_not_a_fixed_value`) and independently on live devnet by decoding raw account bytes rather than trusting the Anchor client's echo (`scripts/devnet_sign_contract_test.ts`).
 
 ---
 
@@ -159,7 +171,9 @@ Per the white paper, auditor review should cover Appendix C (invariants) and App
 - The mainnet `SimulatedModeRejected` compile-time rejection (`--features mainnet`, not testable on devnet by design)
 - The new symmetric `AttestedDevnet`/`AttestedMainnet` environment-mismatch rejection (Finding 1, §7) — same compile-time-gated pattern, same untestable-on-devnet-by-design caveat until redeployed
 - Limitations A-E above in the context of the case-study threat model
+- `sign_contract`'s no-on-chain-creator-check design (limitation F, §7) in the context of what a `ContractSignature` can and cannot be represented as proving — this is the design decision most likely to be misread by someone skimming only the account struct
+- `sign_contract` has no Layer 2 (TypeScript/Mocha) coverage and only one live-devnet happy-path scenario; the adversarial paths (double-sign, wrong content_hash, nonexistent contract) are LiteSVM-only, not yet devnet-verified
 
 ---
 
-*Prepared: June 2026; test-count, scenario-count, and build-tooling corrections applied 2026-07-01. Program commit as of that date: `c40f09a`, 74 tests passing. Finding 1 fix deployed to devnet 2026-07-03, commit `3bf2ac3`, 75 tests passing per build, 5 verification passes (see §7). Demo repo commit: `f6f82e0`. IPFS wiring complete.*
+*Prepared: June 2026; test-count, scenario-count, and build-tooling corrections applied 2026-07-01. Program commit as of that date: `c40f09a`, 74 tests passing. Finding 1 fix deployed to devnet 2026-07-03, commit `3bf2ac3`, 75 tests passing per build, 5 verification passes (see §7). `sign_contract` instruction added 2026-07-15, commit `09c5bfc`, 82 tests passing per build (1 live verification pass as of 2026-07-22, see §2 and §7 items F-G — not yet through the full 4-pass standard). Demo repo commit: `f6f82e0`. IPFS wiring complete.*

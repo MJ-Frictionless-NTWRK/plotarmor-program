@@ -67,6 +67,7 @@ ContractArtifact PDA      = ["contract_artifact", raw_contract_hash]
 EvidenceAnchor PDA        = ["evidence", anchorer_pubkey, contract_artifact_pda]
 AuthorizedContractAnchor  = ["authorized_contract", work_claim_pda, contract_artifact_pda]
 AnchorRecord PDA          = ["anchor", anchored_object_pda, anchor_nonce]
+ContractSignature PDA     = ["signature", contract_artifact_pda, signer_pubkey]              // added 2026-07-15, sign_contract
 // Reserved, year-two, do NOT implement now:
 WorkMetadata PDA          = ["work_meta", work_claim_pda]
 WorkRelation PDA          = ["work_relation", parent_work_claim_pda, child_work_claim_pda]
@@ -150,6 +151,16 @@ pub struct AnchorRecord {             // ~82 bytes; carries NO lifecycle state
     pub created_at: i64,
     pub external_ref_hash: [u8; 32],  // IPFS CIDv0 digest (32 bytes after stripping 0x12 0x20 multihash prefix); zero when no IPFS binding yet
 }
+pub struct ContractSignature {        // ~121 bytes; added 2026-07-15, sign_contract, Option 2 (no on-chain creator check)
+    pub contract_artifact: Pubkey,
+    pub signer: Pubkey,               // any funded wallet; creator/party restriction is enforced OFF-CHAIN only. See Known v1 limitations, item G.
+    pub content_hash: [u8; 32],       // must equal contract_artifact.raw_hash; checked in handler (ContentHashMismatch, 6011) not via seed derivation
+    pub signed_at: i64,               // Clock::get().unix_timestamp, program-captured -- never a client-supplied argument
+    pub slot: u64,                    // Clock::get().slot, for explorer cross-reference
+    pub bump: u8,
+    // No is_initialized field: uses plain `init` (not init_if_needed), so Anchor's own
+    // account-already-exists check is the anti-double-sign guard. See Known v1 limitations, item G.
+}
 ```
 
 ## Instructions (v1 set)
@@ -165,6 +176,15 @@ pub struct AnchorRecord {             // ~82 bytes; carries NO lifecycle state
 - anchor_evidence_contract(raw_contract_hash, contract_kind, anchor_nonce, anchor_mode_arg, asserted_work_claim, external_ref_hash) -> ContractArtifact (init_if_needed) + EvidenceAnchor + AnchorRecord
 - anchor_authorized_contract(raw_contract_hash, contract_kind, anchor_nonce, anchor_mode_arg, external_ref_hash) -> ContractArtifact + AuthorizedContractAnchor + AnchorRecord
   (requires threshold-meeting signatures from the WorkClaim's Ownership)
+- sign_contract(content_hash) -> ContractSignature (added 2026-07-15, sign_contract-spec.md, Option 2 locked by Milan)
+  ContractArtifact must already exist on-chain (never init'd here; sign_contract does not stand alone).
+  Re-derives contract_artifact's seed from the account's OWN stored raw_hash, then separately requires
+  content_hash == contract_artifact.raw_hash in the handler (ContentHashMismatch, 6011) -- kept as two
+  distinct checks so the custom error stays reachable instead of collapsing into a generic ConstraintSeeds
+  failure. Uses plain `init` on ContractSignature (not init_if_needed): a repeat signer for the same
+  (contract, signer) pair hits Anchor's account-already-exists error, which is the correct anti-double-sign
+  behavior. No creator/party check on-chain -- signer may be any funded wallet; see Known v1 limitations,
+  item G. Does NOT create an AnchorRecord (not in the AnchorRecord-creating instruction list below).
 
 ## Invariants (test every one)
 - latest_link.content_artifact == latest_artifact (after every chain-touching tx)
@@ -178,7 +198,9 @@ pub struct AnchorRecord {             // ~82 bytes; carries NO lifecycle state
 - One WorkClaim per claimant per root artifact (accepted v1 constraint)
 - One asserted_work_claim per EvidenceAnchor (accepted v1 constraint; zero pubkey allowed)
 - AnchorRecord created ONLY for externally meaningful events: WorkClaim registration, version add,
-  EvidenceAnchor, AuthorizedContractAnchor. NOT for Ownership or OwnerRecord init.
+  EvidenceAnchor, AuthorizedContractAnchor. NOT for Ownership or OwnerRecord init, and NOT for
+  sign_contract (added 2026-07-15) -- a ContractSignature is not an anchoring event in the
+  AnchoredObjectKind sense; it records a signature against an already-anchored ContractArtifact.
 - anchor_mode immutable per AnchorRecord; re-anchor = new AnchorRecord with new nonce
 - No close instruction exists in v1 for ANY account -- ContentArtifact, ClaimArtifactLink,
   EvidenceAnchor, AuthorizedContractAnchor, AnchorRecord, OwnerRecord, or WorkClaim. Corrected
@@ -234,15 +256,20 @@ ContractKind: Unspecified=0, Nda=1, WriterAgreement=2, Collaboration=3, Option=4
 ContentKind: Unspecified=0, Screenplay=1, Treatment=2, Outline=3, Contract=4, Score=5, Master=6, Foley=7
 OwnerRole: Unspecified=0, Author=1, CoAuthor=2, Producer=3, Financier=4, Assignee=5
 
-Error codes 6000-6010: AlreadyInitialized(6000), StaleLineageHead(6001), AnchorModeNotAllowed(6002),
+Error codes 6000-6011: AlreadyInitialized(6000), StaleLineageHead(6001), AnchorModeNotAllowed(6002),
   SimulatedModeRejected(6003), ShareOverflow(6004), ShareSumMismatch(6005),
   ReservedFieldNonZero(6006, reserved), ThresholdNotMet(6007, reserved), Paused(6008),
-  Unauthorized(6009), SupersededClaim(6010)
+  Unauthorized(6009), SupersededClaim(6010), ContentHashMismatch(6011, sign_contract, added 2026-07-15)
 Reserved codes (6006, 6007) are unused in v1 — do not remove them, they hold their slot.
 
 ## Cost baseline (reference, $90/SOL; confirm on devnet)
 register ~$0.88, add-version ~$0.39, evidence-anchor ~$0.39, authorized-anchor ~$0.37,
 re-anchor ~$0.13, add-co-owner ~$0.13, RegistryConfig ~$0.11 one-time.
+sign_contract: not yet measured. scripts/devnet_sign_contract_test.ts logs the tx signature
+and explorer link but does not compute a SOL/USD cost the way measure_devnet.ts does for the
+other six. ContractSignature is smaller than most anchored accounts (~121 bytes), so expect
+a cost in the same range as add-co-owner/re-anchor (~$0.13), but that is an estimate, not a
+measurement -- do not cite a dollar figure for sign_contract until it is actually measured.
 
 ## Toolchain (as installed on this machine; paper specifies older, reconcile before building)
 Rust 1.96.0, Solana CLI 4.0.1 (Agave), Anchor CLI 1.0.1, Node v24.10.0, Yarn 1.22.22.
@@ -250,13 +277,26 @@ NOTE: installer pulled newer versions than the white paper (paper specifies Sola
 Anchor 0.32.1). Verify via the Solana MCP that no API change affects the canon before building.
 TS client: @coral-xyz/anchor + @solana/web3.js (or @solana/kit), wallet-adapter.
 Tests: two-layer suite.
-  Layer 1 — Rust/LiteSVM: `cargo test` runs 44 tests total: 1 unit test in src/lib.rs
-    plus 43 integration tests in programs/plotarmor/tests/ (happy_paths.rs + security_tests.rs).
-    Fast, no validator needed. `cargo test --features mainnet` additionally requires a
-    mainnet-featured .so at target/deploy-mainnet/plotarmor.so — see programs/plotarmor/tests/common/mod.rs.
+  Layer 1 — Rust/LiteSVM: `cargo test` runs 52 tests total per build: 1 unit test in
+    src/lib.rs, 11 in happy_paths.rs, 33 in security_tests.rs (one of the two build-specific
+    AttestedMainnet/AttestedDevnet cross-environment tests is active per build, see Finding 1
+    in Known v1 limitations), and 7 in sign_contract_tests.rs (added 2026-07-15). Fast, no
+    validator needed. `cargo test --features mainnet` additionally requires a mainnet-featured
+    .so at target/deploy-mainnet/plotarmor.so — see programs/plotarmor/tests/common/mod.rs.
+    Live-verified 2026-07-22: both the default (devnet) and `--features mainnet` builds ran
+    clean at 52/52 after rebuilding target/deploy-mainnet/plotarmor.so, which had gone stale
+    (predated the sign_contract commit and failed 6/7 sign_contract_tests.rs cases with
+    InstructionFallbackNotFound before the rebuild). Rebuild command:
+    `cargo build-sbf --manifest-path programs/plotarmor/Cargo.toml --features mainnet --sbf-out-dir target/deploy-mainnet`.
+    Keep that artifact in sync after every source change or `--features mainnet` runs stale.
   Layer 2 — TypeScript/Anchor: `anchor test` deploys to a local validator and runs 30
-    Mocha/Chai tests in tests/plotarmor.ts. Covers all six instructions with 14 happy-path
-    on-chain state assertions and 16 rejection tests verifying every error code path.
+    Mocha/Chai tests in tests/plotarmor.ts. Covers the original six instructions with 14
+    happy-path on-chain state assertions and 16 rejection tests verifying every error code
+    path. sign_contract (added 2026-07-15) has NO Layer 2 coverage yet — tests/plotarmor.ts
+    was not touched by that change. Its only coverage is Layer 1 (7 LiteSVM tests above) plus
+    a one-off live devnet script (scripts/devnet_sign_contract_test.ts, see Devnet script
+    inventory). Adding Mocha/Chai coverage for sign_contract to tests/plotarmor.ts is
+    unstarted work, not a gap that was silently accepted.
   Combined: `yarn test` runs cargo test then anchor test sequentially.
 
 ## Model guidance (Claude Pro: Sonnet default, Opus and Haiku both available on this plan)
@@ -520,16 +560,31 @@ These findings were confirmed clean by the Solana MCP program_autofixer (zero me
 issues) and identified by manual review against the spec. Prague auditors should review
 against Appendix C invariants and Appendix G acceptance checklist specifically.
 
-## Test coverage report (June 2026; Rust count updated 2026-07-03, see Finding 1)
+## Test coverage report (June 2026; Rust count updated 2026-07-22, see sign_contract below)
 
 Two suites run against the deployed program, totaling 74 tests as of commit c40f09a: 44
 Rust/LiteSVM and 30 TypeScript/Mocha (local validator). All 74 pass as of that commit.
 
-As of the 2026-07-03 Finding 1 fix (commit 3bf2ac3, deployed to devnet): Rust/LiteSVM is
+As of the 2026-07-03 Finding 1 fix (commit 3bf2ac3, deployed to devnet): Rust/LiteSVM was
 45 tests per build (one test in security_tests.rs is build-specific: devnet default build
 runs attested_mainnet_rejected_on_non_mainnet_build, mainnet-featured build runs
-attested_devnet_rejected_on_mainnet_build instead). TypeScript/Mocha remains 30, unaffected.
-Combined per-build total: 75. See AUDITOR_BRIEF.md section 7 for full verification detail.
+attested_devnet_rejected_on_mainnet_build instead). TypeScript/Mocha remained 30, unaffected.
+Combined per-build total was 75. See AUDITOR_BRIEF.md section 7 for full verification detail.
+
+As of the 2026-07-15 sign_contract addition (commit 09c5bfc, see Instructions v1 set and
+Known v1 limitations item G): Rust/LiteSVM is now 52 tests per build (the 45 above plus 7
+in sign_contract_tests.rs). TypeScript/Mocha remains 30 -- sign_contract has no Layer 2
+coverage yet (see Toolchain section). Combined per-build total: 82.
+Live-verified 2026-07-22 (1 pass, this session): both the default (devnet) build and
+`cargo test --features mainnet` ran clean at 52/52. The mainnet-featured run required
+first rebuilding target/deploy-mainnet/plotarmor.so, which had gone stale since the
+2026-07-03 Finding 1 deploy and did not yet contain the sign_contract instruction --
+6 of the 7 sign_contract_tests.rs cases failed with InstructionFallbackNotFound against
+the stale binary before the rebuild. This is a build-artifact staleness finding, not a
+program-logic bug; see the rebuild command in the Toolchain section. Per this file's own
+Verification standard, this is 1 of 4 required passes -- do not treat 52/52 as a closed
+claim until 3 more independent passes (e.g. anchor test / TypeScript coverage once written,
+an independent re-audit, a live devnet re-check) have run.
 
 Invariants confirmed green by TypeScript on-chain assertions:
 - latest_link.content_artifact == latest_artifact after every chain-touching tx
@@ -583,18 +638,22 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
 6. Canonicalization spec v1 with test vectors (needed before case study onboarding; documentation task).
 
 ## Permanent verification toolchain (run before every commit)
-- `python3 scripts/verify_calls.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts`
-  Checks argument counts for all 4 instruction call sites across all 4 TS files that call
+- `python3 scripts/verify_calls.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts scripts/devnet_sign_contract_test.ts`
+  Checks argument counts for all 5 instruction call sites across all 5 TS files that call
   program instructions. Expected: registerWorkClaim=9, addVersion=7, anchorEvidenceContract=6,
-  anchorAuthorizedContract=5. Fixed 2026-07-01: previously only read argv[1] and silently
-  skipped every other file passed on the command line while still reporting success.
-- `python3 scripts/check_integrity.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts`
+  anchorAuthorizedContract=5, signContract=1. Fixed 2026-07-01: previously only read argv[1] and
+  silently skipped every other file passed on the command line while still reporting success.
+  UPDATED 2026-07-22: added devnet_sign_contract_test.ts to the file list and signContract=1
+  to EXPECTED in both scripts/verify_calls.py and scripts/check_integrity.py -- neither had
+  been updated when sign_contract was added on 2026-07-15, so signContract call sites were
+  silently unchecked by this toolchain until this fix.
+- `python3 scripts/check_integrity.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts scripts/devnet_sign_contract_test.ts`
   Checks args + .accountsStrict() present + .rpc()/.instruction() terminator for every call.
 - Both tools exit non-zero on any failure. Run both after any instruction signature change.
 - `python3 scripts/test_checkers_negative.py` — negative-test suite for both checkers above;
   run after modifying either checker to confirm they still detect bad calls.
 - FULL-REPO GREP before any instruction signature change:
-  `grep -rn "\.registerWorkClaim\|\.addVersion\|\.anchorEvidenceContract\|\.anchorAuthorizedContract" . | grep -v node_modules | grep -v target`
+  `grep -rn "\.registerWorkClaim\|\.addVersion\|\.anchorEvidenceContract\|\.anchorAuthorizedContract\|\.signContract" . | grep -v node_modules | grep -v target`
 
 ## Devnet script inventory (scripts/)
 - `measure_devnet.ts` — 24 scenarios (1-7, 9-24; scenario 8 merged into 6). Primary devnet
@@ -608,6 +667,14 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
   that the redeployed devnet program rejects anchor_mode_arg=AttestedMainnet(2) with
   AnchorModeNotAllowed(6002) and still accepts AttestedDevnet(1). Run 2026-07-03 against
   commit 3bf2ac3, both scenarios passed.
+- `devnet_sign_contract_test.ts` (added 2026-07-15) — standalone proof script for
+  sign_contract. Single happy-path scenario: anchor_evidence_contract creates a fresh
+  ContractArtifact, then sign_contract signs it, then the resulting ContractSignature is
+  independently decoded from raw connection.getAccountInfo bytes (not the Anchor client's
+  fetch echo) and checked field-by-field (owner, contract_artifact, signer, content_hash,
+  signed_at > 0, slot > 0). This is the only live-devnet coverage sign_contract has; no
+  adversarial devnet scenarios (double-sign, wrong content_hash, nonexistent contract) have
+  been run live yet -- those are covered only in Rust/LiteSVM (sign_contract_tests.rs).
 
 ## external_ref_hash — full coverage summary
 - All 4 anchoring instructions accept and store external_ref_hash: [u8; 32]
