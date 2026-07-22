@@ -144,6 +144,12 @@ async function main() {
   console.log("\nStep 2: sign_contract...");
   console.log("  ContractSignature PDA:", contractSignature.toBase58());
 
+  // Balance-delta cost measurement, isolated to this instruction alone (not
+  // the step 1 anchor_evidence_contract call above). This is the actual
+  // lamports the payer's wallet lost: new-account rent-exemption + tx fee,
+  // not an estimate derived from account size.
+  const balanceBeforeSign = await connection.getBalance(payer.publicKey, "confirmed");
+
   const t0 = Date.now();
   const signSig = await program.methods
     .signContract(ba(rawContractHash))
@@ -156,9 +162,18 @@ async function main() {
     .rpc({ commitment: "confirmed" });
   const elapsed = Date.now() - t0;
 
+  const balanceAfterSign = await connection.getBalance(payer.publicKey, "confirmed");
+  const costLamports = balanceBeforeSign - balanceAfterSign;
+  const costSol = costLamports / 1e9;
+  const SOL_PRICE_USD = 90; // same reference rate used in CLAUDE.md / AUDITOR_BRIEF.md
+  const costUsd = costSol * SOL_PRICE_USD;
+
   console.log("✓ Transaction confirmed in", elapsed, "ms");
   console.log("✓ Signature:", signSig);
   console.log("✓ Explorer:", `https://explorer.solana.com/tx/${signSig}?cluster=devnet`);
+  console.log(
+    `✓ Cost: ${costLamports} lamports (${costSol.toFixed(9)} SOL, ~$${costUsd.toFixed(4)} at $${SOL_PRICE_USD}/SOL)`
+  );
 
   // 3. Independent verification via raw getAccountInfo (not the Anchor
   //    client's fetch echo) -- decode the account bytes ourselves.
@@ -226,6 +241,9 @@ async function main() {
     raw_contract_hash: rawContractHash.toString("hex"),
     signed_at: decodedSignedAt.toString(),
     slot: decodedSlot.toString(),
+    sign_contract_cost_lamports: costLamports,
+    sign_contract_cost_sol: costSol,
+    sign_contract_cost_usd_at_90: costUsd,
   }, null, 2));
 }
 

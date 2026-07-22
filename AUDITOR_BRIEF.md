@@ -20,20 +20,20 @@ This brief covers the PlotArmor Anchor program implementing the v1 instruction s
 
 **Manual review:** Conducted against the white paper spec, Appendix C invariants, and Appendix G acceptance checklist.
 
-**Test coverage — 82 tests total per build (52 Rust + 30 TypeScript), all passing as of commit `09c5bfc`, superseding the `3bf2ac3` count below:**
+**Test coverage — 86 tests total per build (52 Rust + 34 TypeScript), all passing as of commit `09c5bfc` (docs/tests only, no source change since), superseding the `3bf2ac3` count below:**
 
 Layer 1 (Rust/LiteSVM, 52 tests per build: 1 unit test in `src/lib.rs` + 51 integration tests in `programs/plotarmor/tests/`; one test in `security_tests.rs` is build-specific, so the total is 52 on both the devnet default build and a `--features mainnet` build):
 - `happy_paths.rs`: 11 tests — all instructions, content-addressing convergence, chained versions, chain reuse, reserved-field enforcement
 - `security_tests.rs`: 33 tests — all error codes, atomicity, PDA collision, cross-claim rejections, enum boundary values, symmetric mainnet/devnet mode-rejection (Finding 1, see below)
 - `sign_contract_tests.rs`: 7 tests (added 2026-07-15) — happy path, missing/nonexistent ContractArtifact, content_hash mismatch, double-sign-by-same-signer rejection, on-chain clock (not client-supplied) timestamp/slot, no-on-chain-creator-check confirmed (Option 2, see §7)
-Live-verified 2026-07-22 (1 of the 4-pass standard): both the devnet default build and `cargo test --features mainnet` ran 52/52 clean, after rebuilding `target/deploy-mainnet/plotarmor.so`, which had gone stale since the 2026-07-03 Finding 1 deploy and did not contain the `sign_contract` instruction — 6 of 7 `sign_contract_tests.rs` cases failed with `InstructionFallbackNotFound` against the stale binary before the rebuild. Build-artifact staleness, not a program-logic defect.
+Live-verified 2026-07-22 (2 of the 4-pass standard): (1) both the devnet default build and `cargo test --features mainnet` ran 52/52 clean, after rebuilding `target/deploy-mainnet/plotarmor.so`, which had gone stale since the 2026-07-03 Finding 1 deploy and did not contain the `sign_contract` instruction — 6 of 7 `sign_contract_tests.rs` cases failed with `InstructionFallbackNotFound` against the stale binary before the rebuild (build-artifact staleness, not a program-logic defect); (2) `anchor test` (TypeScript/Mocha, local validator — a distinct execution harness from LiteSVM) ran 34/34 clean on first run, including the 4 new `sign_contract` tests below.
 
-Layer 2 (TypeScript/Mocha, 30 tests, `tests/plotarmor.ts`, local validator):
-- 14 happy-path tests with on-chain state assertions across the original six instructions
-- 16 rejection tests confirming every error code path
-- `sign_contract` has NO Layer 2 (Mocha/local-validator) coverage yet. Its only coverage is Layer 1 above plus a single live-devnet happy-path script (`scripts/devnet_sign_contract_test.ts`, see §2 below). This is unstarted work, not an accepted gap.
+Layer 2 (TypeScript/Mocha, 34 tests, `tests/plotarmor.ts`, local validator; 30 original + 4 added 2026-07-22 for `sign_contract`):
+- 15 happy-path tests with on-chain state assertions across all seven instructions
+- 19 rejection tests confirming every error code path
+- `sign_contract` Layer 2 coverage (added 2026-07-22): 1 happy path (creates `ContractSignature`, asserts `contractArtifact`/`signer`/`contentHash` match the submitted values and `signedAt`/`slot` are populated from the chain) + 3 rejections mirroring `sign_contract_tests.rs` — wrong `content_hash` → `ContentHashMismatch` (6011), double-sign by the same signer → account already in use, signing a nonexistent `ContractArtifact` → account-validation failure. No adversarial live-devnet coverage yet for these three paths — see §10.
 
-*Prior count (`3bf2ac3`): 75 tests per build (45 Rust + 30 TypeScript). The 2026-07-15 `sign_contract` addition added 7 Rust tests, bringing the per-build Rust total to 52 and the combined total to 82.*
+*Prior count (`3bf2ac3`): 75 tests per build (45 Rust + 30 TypeScript). The 2026-07-15 `sign_contract` addition added 7 Rust tests, bringing the per-build Rust total to 52 and the combined total to 82. The 2026-07-22 Layer 2 addition brought TypeScript to 34 and the combined total to 86.*
 *Prior count (`c40f09a`): 74 tests (44 Rust + 30 TypeScript).*
 
 **Devnet scenario suite** (`scripts/measure_devnet.ts`): 24 scenarios (1-7, 9-24; scenario 8 intentionally merged into scenario 6) — positive measurements and adversarial edge cases. All pass. Script exits non-zero on any failure. `measure_devnet.ts` does not cover `sign_contract`; see `scripts/devnet_sign_contract_test.ts` above for its separate, standalone devnet proof.
@@ -112,7 +112,7 @@ At $90/SOL reference price (June 2026):
 | Re-anchor (new `AnchorRecord` only) | AnchorRecord | ~$0.13 |
 | `add_owner` | OwnerRecord | ~$0.13 |
 | `init_registry_config` (one-time) | RegistryConfig | ~$0.11 |
-| `sign_contract` (added 2026-07-15) | ContractSignature | not yet measured — `devnet_sign_contract_test.ts` confirms the tx but does not compute a cost figure. ContractSignature is ~121 bytes, smaller than most anchored accounts, so expect a range similar to re-anchor/add-owner (~$0.13), but treat that as an estimate only until measured. |
+| `sign_contract` (added 2026-07-15, measured 2026-07-22) | ContractSignature | ~$0.1564 (1,738,040 lamports = 1,733,040 rent-exemption for the 121-byte account + 5,000 base tx fee; measured live via wallet balance-delta, tx `mMCthtHF12bGA5YHhLmKzufokJdsjK779gk2z7dqdNd35pNvFBsUVLM1kGToAKD1DrmaM8GiaoX4FCWTYc2hB49`) |
 
 ---
 
@@ -172,8 +172,8 @@ Per the white paper, auditor review should cover Appendix C (invariants) and App
 - The new symmetric `AttestedDevnet`/`AttestedMainnet` environment-mismatch rejection (Finding 1, §7) — same compile-time-gated pattern, same untestable-on-devnet-by-design caveat until redeployed
 - Limitations A-E above in the context of the case-study threat model
 - `sign_contract`'s no-on-chain-creator-check design (limitation F, §7) in the context of what a `ContractSignature` can and cannot be represented as proving — this is the design decision most likely to be misread by someone skimming only the account struct
-- `sign_contract` has no Layer 2 (TypeScript/Mocha) coverage and only one live-devnet happy-path scenario; the adversarial paths (double-sign, wrong content_hash, nonexistent contract) are LiteSVM-only, not yet devnet-verified
+- `sign_contract` now has Layer 1 (LiteSVM) and Layer 2 (TypeScript/local-validator) coverage for all three adversarial paths, plus one live-devnet happy-path scenario, but the adversarial paths themselves (double-sign, wrong content_hash, nonexistent contract) have never been run against live devnet — only LiteSVM and a local validator. This is a smaller gap than before but not closed.
 
 ---
 
-*Prepared: June 2026; test-count, scenario-count, and build-tooling corrections applied 2026-07-01. Program commit as of that date: `c40f09a`, 74 tests passing. Finding 1 fix deployed to devnet 2026-07-03, commit `3bf2ac3`, 75 tests passing per build, 5 verification passes (see §7). `sign_contract` instruction added 2026-07-15, commit `09c5bfc`, 82 tests passing per build (1 live verification pass as of 2026-07-22, see §2 and §7 items F-G — not yet through the full 4-pass standard). Demo repo commit: `f6f82e0`. IPFS wiring complete.*
+*Prepared: June 2026; test-count, scenario-count, and build-tooling corrections applied 2026-07-01. Program commit as of that date: `c40f09a`, 74 tests passing. Finding 1 fix deployed to devnet 2026-07-03, commit `3bf2ac3`, 75 tests passing per build, 5 verification passes (see §7). `sign_contract` instruction added 2026-07-15, commit `09c5bfc`. As of 2026-07-22 (docs, Layer 2 tests, and cost measurement added on top of `09c5bfc`, no source change): 86 tests passing per build (52 Rust + 34 TypeScript), sign_contract devnet cost measured at ~$0.1564, 2 of 4 required verification passes complete (see §2 and §7 items F-G) — not yet through the full 4-pass standard. Demo repo commit: `f6f82e0`. IPFS wiring complete.*

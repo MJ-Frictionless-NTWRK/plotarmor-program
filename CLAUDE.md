@@ -264,12 +264,14 @@ Reserved codes (6006, 6007) are unused in v1 — do not remove them, they hold t
 
 ## Cost baseline (reference, $90/SOL; confirm on devnet)
 register ~$0.88, add-version ~$0.39, evidence-anchor ~$0.39, authorized-anchor ~$0.37,
-re-anchor ~$0.13, add-co-owner ~$0.13, RegistryConfig ~$0.11 one-time.
-sign_contract: not yet measured. scripts/devnet_sign_contract_test.ts logs the tx signature
-and explorer link but does not compute a SOL/USD cost the way measure_devnet.ts does for the
-other six. ContractSignature is smaller than most anchored accounts (~121 bytes), so expect
-a cost in the same range as add-co-owner/re-anchor (~$0.13), but that is an estimate, not a
-measurement -- do not cite a dollar figure for sign_contract until it is actually measured.
+re-anchor ~$0.13, add-co-owner ~$0.13, RegistryConfig ~$0.11 one-time,
+sign_contract ~$0.1564 (added 2026-07-15, measured 2026-07-22).
+sign_contract measured live on devnet: 1,738,040 lamports total (0.00173804 SOL, ~$0.1564
+at $90/SOL) = 1,733,040 lamports rent-exemption for the 121-byte ContractSignature account
++ 5,000 lamports base tx fee. Measured via a wallet balance-delta check isolated to the
+sign_contract call alone (scripts/devnet_sign_contract_test.ts), not derived from account
+size -- real tx: mMCthtHF12bGA5YHhLmKzufokJdsjK779gk2z7dqdNd35pNvFBsUVLM1kGToAKD1DrmaM8GiaoX4FCWTYc2hB49.
+Superseded a prior "not yet measured, ~$0.13 estimate" placeholder.
 
 ## Toolchain (as installed on this machine; paper specifies older, reconcile before building)
 Rust 1.96.0, Solana CLI 4.0.1 (Agave), Anchor CLI 1.0.1, Node v24.10.0, Yarn 1.22.22.
@@ -289,14 +291,16 @@ Tests: two-layer suite.
     InstructionFallbackNotFound before the rebuild). Rebuild command:
     `cargo build-sbf --manifest-path programs/plotarmor/Cargo.toml --features mainnet --sbf-out-dir target/deploy-mainnet`.
     Keep that artifact in sync after every source change or `--features mainnet` runs stale.
-  Layer 2 — TypeScript/Anchor: `anchor test` deploys to a local validator and runs 30
-    Mocha/Chai tests in tests/plotarmor.ts. Covers the original six instructions with 14
-    happy-path on-chain state assertions and 16 rejection tests verifying every error code
-    path. sign_contract (added 2026-07-15) has NO Layer 2 coverage yet — tests/plotarmor.ts
-    was not touched by that change. Its only coverage is Layer 1 (7 LiteSVM tests above) plus
-    a one-off live devnet script (scripts/devnet_sign_contract_test.ts, see Devnet script
-    inventory). Adding Mocha/Chai coverage for sign_contract to tests/plotarmor.ts is
-    unstarted work, not a gap that was silently accepted.
+  Layer 2 — TypeScript/Anchor: `anchor test` deploys to a local validator and runs 34
+    Mocha/Chai tests in tests/plotarmor.ts (added 2026-07-22: 4 sign_contract tests, up from
+    30). Covers all seven instructions with 15 happy-path on-chain state assertions and 19
+    rejection tests verifying every error code path. sign_contract's Layer 2 coverage: 1 happy
+    path (creates ContractSignature, asserts contractArtifact/signer/contentHash match and
+    signedAt/slot are populated from the chain) + 3 rejections (wrong content_hash ->
+    ContentHashMismatch 6011; double-sign by same signer -> already in use; signing a
+    nonexistent ContractArtifact -> account-validation failure), mirroring the error paths
+    already covered in sign_contract_tests.rs. Live-verified 2026-07-22 (1 pass, this
+    session): `anchor test`, 34/34 passing on first run.
   Combined: `yarn test` runs cargo test then anchor test sequentially.
 
 ## Model guidance (Claude Pro: Sonnet default, Opus and Haiku both available on this plan)
@@ -573,18 +577,29 @@ Combined per-build total was 75. See AUDITOR_BRIEF.md section 7 for full verific
 
 As of the 2026-07-15 sign_contract addition (commit 09c5bfc, see Instructions v1 set and
 Known v1 limitations item G): Rust/LiteSVM is now 52 tests per build (the 45 above plus 7
-in sign_contract_tests.rs). TypeScript/Mocha remains 30 -- sign_contract has no Layer 2
-coverage yet (see Toolchain section). Combined per-build total: 82.
-Live-verified 2026-07-22 (1 pass, this session): both the default (devnet) build and
-`cargo test --features mainnet` ran clean at 52/52. The mainnet-featured run required
-first rebuilding target/deploy-mainnet/plotarmor.so, which had gone stale since the
-2026-07-03 Finding 1 deploy and did not yet contain the sign_contract instruction --
-6 of the 7 sign_contract_tests.rs cases failed with InstructionFallbackNotFound against
-the stale binary before the rebuild. This is a build-artifact staleness finding, not a
-program-logic bug; see the rebuild command in the Toolchain section. Per this file's own
-Verification standard, this is 1 of 4 required passes -- do not treat 52/52 as a closed
-claim until 3 more independent passes (e.g. anchor test / TypeScript coverage once written,
-an independent re-audit, a live devnet re-check) have run.
+in sign_contract_tests.rs). Combined per-build total at that point: 82 (52 Rust + 30
+TypeScript, sign_contract not yet covered at Layer 2).
+
+As of 2026-07-22 (this session, still commit 09c5bfc -- no source change, docs/tests only):
+TypeScript/Mocha is now 34 tests (30 above plus 4 new sign_contract tests in
+tests/plotarmor.ts: 1 happy path asserting contractArtifact/signer/contentHash match and
+signedAt/slot are populated from the chain, plus 3 rejections mirroring
+sign_contract_tests.rs -- wrong content_hash -> ContentHashMismatch 6011, double-sign by
+same signer -> already in use, signing a nonexistent ContractArtifact -> account-validation
+failure). Combined per-build total: 86 (52 Rust + 34 TypeScript).
+
+Live-verified 2026-07-22 (2 of 4 passes now complete):
+(1) both the default (devnet) build and `cargo test --features mainnet` ran clean at
+52/52, after rebuilding target/deploy-mainnet/plotarmor.so, which had gone stale since the
+2026-07-03 Finding 1 deploy and did not yet contain the sign_contract instruction -- 6 of
+the 7 sign_contract_tests.rs cases failed with InstructionFallbackNotFound against the
+stale binary before the rebuild (build-artifact staleness, not a program-logic bug; see the
+rebuild command in the Toolchain section).
+(2) `anchor test` (TypeScript/Mocha, local validator -- a distinct execution harness from
+LiteSVM) ran clean at 34/34 on first run, including the 4 new sign_contract tests.
+Per this file's own Verification standard, this is 2 of 4 required passes -- do not treat
+this as a closed claim until 2 more independent passes (e.g. an independent re-audit, a
+live devnet adversarial re-check) have run.
 
 Invariants confirmed green by TypeScript on-chain assertions:
 - latest_link.content_artifact == latest_artifact after every chain-touching tx
@@ -674,7 +689,14 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
   fetch echo) and checked field-by-field (owner, contract_artifact, signer, content_hash,
   signed_at > 0, slot > 0). This is the only live-devnet coverage sign_contract has; no
   adversarial devnet scenarios (double-sign, wrong content_hash, nonexistent contract) have
-  been run live yet -- those are covered only in Rust/LiteSVM (sign_contract_tests.rs).
+  been run live yet -- those are covered only in Rust/LiteSVM (sign_contract_tests.rs) and,
+  as of 2026-07-22, in TypeScript/Mocha against a local validator (see Toolchain section) --
+  neither is the same as a live adversarial devnet run.
+  UPDATED 2026-07-22: added a wallet balance-delta cost measurement isolated to the
+  sign_contract call (before/after connection.getBalance around step 2 only, not step 1's
+  anchor_evidence_contract). Real measured cost: 1,738,040 lamports (0.00173804 SOL, ~$0.1564
+  at $90/SOL) = 1,733,040 lamports rent-exemption for the 121-byte ContractSignature account
+  + 5,000 lamports base tx fee. See Cost baseline section for the canonical figure and tx id.
 
 ## external_ref_hash — full coverage summary
 - All 4 anchoring instructions accept and store external_ref_hash: [u8; 32]

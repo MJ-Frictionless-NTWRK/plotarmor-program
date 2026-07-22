@@ -188,6 +188,44 @@ describe("PlotArmor", () => {
     return { rawHash, contentArtifact, claimArtifactLink, anchorRecord, linkNonce, externalRefHash };
   }
 
+  // Create a ContractArtifact via anchor_evidence_contract (the unilateral path --
+  // no WorkClaim/Ownership fixture required). Returns the new PDA and the raw hash
+  // used to create it, for reuse by sign_contract tests.
+  async function createContractArtifact(opts: {
+    rawContractHash?: Buffer;
+    anchorer?: Keypair;
+  } = {}): Promise<{ contractArtifact: PublicKey; rawContractHash: Buffer }> {
+    const anchorer = opts.anchorer ?? payer;
+    const rawContractHash = opts.rawContractHash ?? rh();
+    const anchorNonce = rh();
+    const contractArtifact = derive([Buffer.from("contract_artifact"), rawContractHash]);
+    const evidenceAnchor = derive([
+      Buffer.from("evidence"),
+      anchorer.publicKey.toBuffer(),
+      contractArtifact.toBuffer(),
+    ]);
+    const anchorRecord = derive([
+      Buffer.from("anchor"),
+      evidenceAnchor.toBuffer(),
+      anchorNonce,
+    ]);
+
+    await program.methods
+      .anchorEvidenceContract(ba(rawContractHash), 1, ba(anchorNonce), 1, PublicKey.default, ba(rh()))
+      .accountsStrict({
+        registryConfig,
+        contractArtifact,
+        evidenceAnchor,
+        anchorRecord,
+        anchorer: anchorer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers(opts.anchorer ? [opts.anchorer] : [])
+      .rpc();
+
+    return { contractArtifact, rawContractHash };
+  }
+
   // Initialize the registry config once for the whole suite.
   before(async () => {
     await program.methods
@@ -507,6 +545,34 @@ describe("PlotArmor", () => {
       expect(ar.anchoredObjectKind).to.equal(3); // AuthorizedContractAnchor
       expect(ar.anchorMode).to.equal(1);
       expect(Buffer.from(ar.externalRefHash)).to.deep.equal(authExtHash);
+    });
+  });
+
+  describe("sign_contract", () => {
+    it("creates ContractSignature with correct signer, content_hash, and on-chain clock values", async () => {
+      const { contractArtifact, rawContractHash } = await createContractArtifact();
+      const contractSignature = derive([
+        Buffer.from("signature"),
+        contractArtifact.toBuffer(),
+        payer.publicKey.toBuffer(),
+      ]);
+
+      await program.methods
+        .signContract(ba(rawContractHash))
+        .accountsStrict({
+          contractArtifact,
+          contractSignature,
+          signer: payer.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      const sig = await program.account.contractSignature.fetch(contractSignature);
+      expect(sig.contractArtifact.toBase58()).to.equal(contractArtifact.toBase58());
+      expect(sig.signer.toBase58()).to.equal(payer.publicKey.toBase58());
+      expect(Buffer.from(sig.contentHash)).to.deep.equal(rawContractHash);
+      expect(sig.signedAt.toNumber()).to.be.greaterThan(0);
+      expect(sig.slot.toNumber()).to.be.greaterThan(0);
     });
   });
 
@@ -1018,6 +1084,97 @@ describe("PlotArmor", () => {
         expect.fail("should have thrown");
       } catch (err) {
         expectErr(err, "already in use", "0x0");
+      }
+    });
+
+    // --- sign_contract ────────────────────────────────────────────────────────
+
+    it("sign_contract wrong content_hash -> ContentHashMismatch 6011", async () => {
+      const { contractArtifact } = await createContractArtifact();
+      const wrongHash = rh();
+      const contractSignature = derive([
+        Buffer.from("signature"),
+        contractArtifact.toBuffer(),
+        payer.publicKey.toBuffer(),
+      ]);
+      try {
+        await program.methods
+          .signContract(ba(wrongHash))
+          .accountsStrict({
+            contractArtifact,
+            contractSignature,
+            signer: payer.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+        expect.fail("should have thrown");
+      } catch (err) {
+        expectErr(err, "ContentHashMismatch", "6011");
+      }
+    });
+
+    it("sign_contract double-sign by same signer -> already in use", async () => {
+      const { contractArtifact, rawContractHash } = await createContractArtifact();
+      const contractSignature = derive([
+        Buffer.from("signature"),
+        contractArtifact.toBuffer(),
+        payer.publicKey.toBuffer(),
+      ]);
+      await program.methods
+        .signContract(ba(rawContractHash))
+        .accountsStrict({
+          contractArtifact,
+          contractSignature,
+          signer: payer.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      try {
+        await program.methods
+          .signContract(ba(rawContractHash))
+          .accountsStrict({
+            contractArtifact,
+            contractSignature,
+            signer: payer.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+        expect.fail("should have thrown");
+      } catch (err) {
+        expectErr(err, "already in use", "0x0");
+      }
+    });
+
+    it("sign_contract on a nonexistent ContractArtifact fails", async () => {
+      const phantomHash = rh();
+      const phantomContractArtifact = derive([Buffer.from("contract_artifact"), phantomHash]);
+      const contractSignature = derive([
+        Buffer.from("signature"),
+        phantomContractArtifact.toBuffer(),
+        payer.publicKey.toBuffer(),
+      ]);
+      try {
+        await program.methods
+          .signContract(ba(phantomHash))
+          .accountsStrict({
+            contractArtifact: phantomContractArtifact,
+            contractSignature,
+            signer: payer.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+        expect.fail("should have thrown");
+      } catch (err) {
+        expectErr(
+          err,
+          "AccountNotInitialized",
+          "AccountOwnedByWrongProgram",
+          "AccountDiscriminatorMismatch",
+          "AccountDiscriminatorNotFound",
+          "ConstraintSeeds",
+          "does not exist"
+        );
       }
     });
   });
