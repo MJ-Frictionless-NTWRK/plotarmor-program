@@ -601,6 +601,37 @@ Per this file's own Verification standard, this is 2 of 4 required passes -- do 
 this as a closed claim until 2 more independent passes (e.g. an independent re-audit, a
 live devnet adversarial re-check) have run.
 
+Live-verified 2026-07-22 (session 2, this session -- 4 of 4 passes now complete):
+(3) Independent re-audit: sign_contract.rs, state.rs, error.rs, and sign_contract-spec.md
+were read fresh against each other in a separate session from the one that ran passes 1-2.
+Confirmed: ContractSignature field layout and LEN (121 bytes) match the spec exactly;
+error.rs's ContentHashMismatch is the only sign_contract-specific error code (UnauthorizedSigner
+from the original spec draft was correctly never added, since Milan's Option 2 decision
+dropped the on-chain creator check -- see Known v1 limitations item G); the seeds-vs-handler
+double-check pattern for content_hash (PDA re-derivation from the account's own raw_hash,
+separately checked against the client's content_hash argument) matches the comment rationale
+in sign_contract.rs exactly. As part of this same pass, both cargo test builds (default and
+--features mainnet) were independently re-run and reconfirmed 52/52 each, and anchor test was
+independently re-run and reconfirmed 34/34 -- all three suite runs are new executions in this
+session, not a re-read of the prior session's output.
+(4) Live devnet adversarial check: the gap explicitly flagged in the Devnet script inventory
+section below (no adversarial devnet scenarios for sign_contract had ever been run live, only
+in LiteSVM and against a local validator) was closed. New script
+scripts/devnet_sign_contract_adversarial_test.ts runs the three rejection paths against the
+live deployed devnet program (3h9CzV9MJDeD5yjhVhdE6cupuXVRnLW1Cu6P14EJBKv2): wrong content_hash
+-> ContentHashMismatch 6011, double-sign by the same signer -> already-in-use, and signing a
+nonexistent ContractArtifact -> account-validation failure. All 3 passed on first live run
+(fixture tx 4sgyWokaGGCYo3zHpHe82u8F91U76jZDNCxF1gQjRMJwn4BCpyaX6mp7CFJ4TXzCWQ5mf7uN8CGtbDRBPC3BoeJg,
+first-sign tx XXaX1toBSGNThRXzyJAgroKZUpR7A7yecvfeRC5b9gyfBHDaMPCJLskxKq78oYC2oEmH5c16xg36Ati7mNnjCqY).
+scripts/verify_calls.py and scripts/check_integrity.py both pass against the new file (5 call
+sites, all correct arg counts and account/terminator shape); the full-repo grep for all 5
+instruction call-site patterns was re-run and turned up nothing missed.
+Per this file's own Verification standard, sign_contract has now completed all 4 required
+verification passes: (1) LiteSVM/mainnet-featured build, (2) anchor test/local validator,
+(3) independent re-audit, (4) live devnet adversarial check. This closes the previously
+open item; the only remaining known gap is the design-accepted absence of an on-chain
+creator/party check (Known v1 limitations item G, deliberate, not a verification gap).
+
 Invariants confirmed green by TypeScript on-chain assertions:
 - latest_link.content_artifact == latest_artifact after every chain-touching tx
 - add_version validates against latest_link, not latest_artifact (anti-fork)
@@ -653,8 +684,8 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
 6. Canonicalization spec v1 with test vectors (needed before case study onboarding; documentation task).
 
 ## Permanent verification toolchain (run before every commit)
-- `python3 scripts/verify_calls.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts scripts/devnet_sign_contract_test.ts`
-  Checks argument counts for all 5 instruction call sites across all 5 TS files that call
+- `python3 scripts/verify_calls.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts scripts/devnet_sign_contract_test.ts scripts/devnet_sign_contract_adversarial_test.ts`
+  Checks argument counts for all 5 instruction call sites across all 6 TS files that call
   program instructions. Expected: registerWorkClaim=9, addVersion=7, anchorEvidenceContract=6,
   anchorAuthorizedContract=5, signContract=1. Fixed 2026-07-01: previously only read argv[1] and
   silently skipped every other file passed on the command line while still reporting success.
@@ -662,7 +693,9 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
   to EXPECTED in both scripts/verify_calls.py and scripts/check_integrity.py -- neither had
   been updated when sign_contract was added on 2026-07-15, so signContract call sites were
   silently unchecked by this toolchain until this fix.
-- `python3 scripts/check_integrity.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts scripts/devnet_sign_contract_test.ts`
+  UPDATED 2026-07-22 (session 2): added devnet_sign_contract_adversarial_test.ts to the file
+  list; both checkers pass against it (5 call sites, all correct).
+- `python3 scripts/check_integrity.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts scripts/devnet_sign_contract_test.ts scripts/devnet_sign_contract_adversarial_test.ts`
   Checks args + .accountsStrict() present + .rpc()/.instruction() terminator for every call.
 - Both tools exit non-zero on any failure. Run both after any instruction signature change.
 - `python3 scripts/test_checkers_negative.py` — negative-test suite for both checkers above;
@@ -687,16 +720,20 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
   ContractArtifact, then sign_contract signs it, then the resulting ContractSignature is
   independently decoded from raw connection.getAccountInfo bytes (not the Anchor client's
   fetch echo) and checked field-by-field (owner, contract_artifact, signer, content_hash,
-  signed_at > 0, slot > 0). This is the only live-devnet coverage sign_contract has; no
-  adversarial devnet scenarios (double-sign, wrong content_hash, nonexistent contract) have
-  been run live yet -- those are covered only in Rust/LiteSVM (sign_contract_tests.rs) and,
-  as of 2026-07-22, in TypeScript/Mocha against a local validator (see Toolchain section) --
-  neither is the same as a live adversarial devnet run.
+  signed_at > 0, slot > 0). This was, until the adversarial script below was added, the only
+  live-devnet coverage sign_contract had.
   UPDATED 2026-07-22: added a wallet balance-delta cost measurement isolated to the
   sign_contract call (before/after connection.getBalance around step 2 only, not step 1's
   anchor_evidence_contract). Real measured cost: 1,738,040 lamports (0.00173804 SOL, ~$0.1564
   at $90/SOL) = 1,733,040 lamports rent-exemption for the 121-byte ContractSignature account
   + 5,000 lamports base tx fee. See Cost baseline section for the canonical figure and tx id.
+- `devnet_sign_contract_adversarial_test.ts` (added 2026-07-22, session 2 -- closes the gap
+  the entry above used to flag): the 3 adversarial sign_contract paths, run live against the
+  deployed devnet program (previously covered only in Rust/LiteSVM and TypeScript/local-validator,
+  never against a real devnet RPC): wrong content_hash -> ContentHashMismatch 6011, double-sign
+  by the same signer -> already-in-use, signing a nonexistent ContractArtifact -> account-
+  validation failure. All 3 passed on first live run. Run with:
+  `DEVNET_RPC_URL=<url> node_modules/.bin/ts-node --transpile-only scripts/devnet_sign_contract_adversarial_test.ts`
 
 ## external_ref_hash — full coverage summary
 - All 4 anchoring instructions accept and store external_ref_hash: [u8; 32]
