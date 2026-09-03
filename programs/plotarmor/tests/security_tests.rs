@@ -1757,3 +1757,100 @@ fn authorized_ext_ref_realistic_cid_digest_roundtrips() {
     let ar: AnchorRecord = read_account(&ctx.svm, &ar_pda);
     assert_eq!(ar.external_ref_hash, digest);
 }
+
+// Negative counterpart to init_registry_config_happy_path.
+//
+// Every other test in this repo (via common::setup) patches ProgramData so
+// upgrade_authority_address matches the caller, which exercises only the PASSING
+// side of init_registry_config's upgrade-authority constraint. Until this test,
+// nothing anywhere confirmed a non-authority signer is actually rejected, even
+// though that constraint is the only thing standing between an arbitrary wallet
+// and the protocol's RegistryConfig singleton (Known v1 limitations, item B).
+//
+// Patches ProgramData to name a DIFFERENT pubkey as upgrade authority, then has
+// context.authority (a legitimately funded wallet that is now NOT the upgrade
+// authority) call init_registry_config. Expect Unauthorized (6009).
+//
+// Note this isolates the SECOND constraint on init_registry_config. The
+// program_data address passed is the canonical one, so the first constraint
+// (program.programdata_address()? == program_data.key()) passes and the failure
+// can only come from the upgrade-authority comparison.
+fn patch_upgrade_authority(svm: &mut litesvm::LiteSVM, new_authority: Pubkey) {
+    use solana_loader_v3_interface::state::UpgradeableLoaderState;
+    use solana_sdk_ids::bpf_loader_upgradeable;
+
+    // Same shape as common/mod.rs setup(), which is the established pattern for
+    // rewriting the ProgramData header under LiteSVM.
+    let programdata_address = Pubkey::find_program_address(
+        &[plotarmor::ID.as_ref()],
+        &bpf_loader_upgradeable::id(),
+    ).0;
+    let mut pd_account = svm.get_account(&programdata_address).unwrap();
+    let metadata_len = UpgradeableLoaderState::size_of_programdata_metadata();
+    let existing: UpgradeableLoaderState =
+        bincode::deserialize(&pd_account.data[..metadata_len]).unwrap();
+    let slot = match existing {
+        UpgradeableLoaderState::ProgramData { slot, .. } => slot,
+        _ => 0,
+    };
+    let new_header = UpgradeableLoaderState::ProgramData {
+        slot,
+        upgrade_authority_address: Some(new_authority),
+    };
+    let header_bytes = bincode::serialize(&new_header).unwrap();
+    pd_account.data[..metadata_len].copy_from_slice(&header_bytes);
+    svm.set_account(programdata_address, pd_account).unwrap();
+}
+
+#[test]
+fn non_upgrade_authority_cannot_init_registry_config() {
+    use solana_sdk_ids::bpf_loader_upgradeable;
+
+    let mut context = setup();
+
+    // The real upgrade authority is somebody else entirely.
+    let real_upgrade_authority = Keypair::new();
+    patch_upgrade_authority(&mut context.svm, real_upgrade_authority.pubkey());
+
+    // Sanity: the impostor is funded and is NOT the recorded upgrade authority,
+    // so a rejection cannot be mistaken for insufficient lamports.
+    assert_ne!(
+        context.authority.pubkey(),
+        real_upgrade_authority.pubkey(),
+        "impostor must differ from the recorded upgrade authority"
+    );
+
+    let registry_config = Pubkey::find_program_address(&[b"config"], &plotarmor::ID).0;
+    let program_data = Pubkey::find_program_address(
+        &[plotarmor::ID.as_ref()],
+        &bpf_loader_upgradeable::id(),
+    ).0;
+
+    let instruction = Instruction::new_with_bytes(
+        plotarmor::ID,
+        &plotarmor::instruction::InitRegistryConfig {}.data(),
+        plotarmor::accounts::InitRegistryConfig {
+            registry_config,
+            signer: context.authority.pubkey(),
+            system_program: system_program::ID,
+            program: plotarmor::ID,
+            program_data,
+        }
+        .to_account_metas(None),
+    );
+
+    let error = send_instruction_result(&mut context.svm, instruction, &context.authority)
+        .expect_err("init_registry_config must reject a signer that is not the upgrade authority");
+    assert_anchor_error(&error, "Unauthorized", 6009);
+
+    // The singleton must not exist afterwards; a rejected init must leave no state.
+    assert!(
+        context.svm.get_account(&registry_config).is_none()
+            || context
+                .svm
+                .get_account(&registry_config)
+                .map(|a| a.owner != plotarmor::ID)
+                .unwrap_or(true),
+        "RegistryConfig must not have been created by a rejected init"
+    );
+}
