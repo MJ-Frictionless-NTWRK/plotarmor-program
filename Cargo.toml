@@ -4,6 +4,13 @@ members = [
 ]
 resolver = "2"
 
+# Consumed by solana-verify to select the deterministic docker build image.
+# Required because Anchor 1.0 uses the split solana-* crates, so Cargo.lock
+# contains no solana-program entry for solana-verify to fall back to and
+# version detection would otherwise fail.
+[workspace.metadata.cli]
+solana = "4.0.1"
+
 [profile.release]
 overflow-checks = true
 lto = "fat"

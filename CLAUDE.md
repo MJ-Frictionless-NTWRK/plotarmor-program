@@ -164,6 +164,17 @@ pub struct ContractSignature {        // ~121 bytes; added 2026-07-15, sign_cont
 ```
 
 ## Instructions (v1 set)
+The v1 program has SEVEN instructions, all present in the deployed devnet program and all
+listed below: init_registry_config, add_owner, anchor_authorized_contract,
+anchor_evidence_contract, add_version, register_work_claim, sign_contract. Corrected
+2026-09-03: sessions have repeatedly been briefed that the program is "frozen at four
+instructions." Four is the count of ANCHOR-CREATING instructions (register_work_claim,
+add_version, anchor_evidence_contract, anchor_authorized_contract), which is the correct
+scope for the external_ref_hash and AnchorRecord sections further down, but it is NOT the
+instruction count. Five is the count of instructions called from TypeScript and checked by
+scripts/verify_calls.py. Seven is the total. Verified by grep of `pub fn` in
+programs/plotarmor/src/lib.rs. Scope remains frozen: no eighth instruction.
+
 - register_work_claim(raw_hash, content_kind, claim_kind, share params, link_nonce, anchor_nonce, anchor_mode_arg, external_ref_hash)
   Creates ContentArtifact (init_if_needed), WorkClaim, Ownership, first OwnerRecord,
   the FIRST ClaimArtifactLink (previous_link = zero), and an AnchorRecord for the registration.
@@ -302,6 +313,86 @@ Tests: two-layer suite.
     already covered in sign_contract_tests.rs. Live-verified 2026-07-22 (1 pass, this
     session): `anchor test`, 34/34 passing on first run.
   Combined: `yarn test` runs cargo test then anchor test sequentially.
+
+## Build and deploy configuration (added 2026-09-03)
+
+Current HEAD: 98a7ebb ("docs: close sign_contract 4-pass verification with live devnet
+adversarial check"). Correcting a stale briefing: sessions have been told HEAD is 27556a0.
+That commit is real but sits 10 commits back ("devnet_register_test: add external_ref_hash
+parameter and on-chain round-trip verification"). Check `git rev-parse HEAD` rather than
+trusting a briefed value.
+
+DEPLOYED DEVNET BINARY IS BEHIND HEAD, and not for the usual reason. Source has not
+drifted: programs/plotarmor/src has had zero changes between commit 09c5bfc (the deployed
+source) and 98a7ebb. The COMPILER drifted. The deployed binary was produced by
+platform-tools v1.52; cargo-build-sbf 4.0.0 now defaults to v1.53, and the two produce
+different bytes from identical source (measured 2026-09-03: .text differs by 15,904 bytes,
+.rodata by 32, .data.rel.ro identical, string tables identical, both SBPF v0). Two
+independent cold builds under v1.53 agreed with each other exactly, so the build IS
+deterministic per toolchain. A warm rebuild is NOT a reproducibility test: cargo's
+fingerprint does not notice a platform-tools swap, so it will report success in ~1.5s
+having recompiled nothing and simply copied the stale artifact. Always use a fresh
+CARGO_TARGET_DIR when testing reproducibility. Pin the tools version explicitly with
+`cargo build-sbf --tools-version v1.52` to reproduce the currently deployed bytes.
+
+PROVEN 2026-09-03: commit 09c5bfc built with `--tools-version v1.52` from a fresh
+CARGO_TARGET_DIR at a different filesystem path reproduces the deployed devnet binary
+EXACTLY (sha256 of both, trailing zeros trimmed:
+5663e20f992914ad1a2671888fd3062a36df69ecc6ac81ee1318f9e702bc3fb5, 470,257 bytes). So the
+deployed binary is commit 09c5bfc, the build is fully reproducible once the tools version
+is pinned, and platform-tools v1.52 is still installable via `--tools-version v1.52`.
+
+THE TWO BUILD COMMANDS IN THIS REPO DISAGREE. On this machine, `anchor build` / `anchor
+test` (anchor-cli 1.0.1) selects platform-tools v1.52, while `cargo build-sbf` (Solana CLI
+4.0.1 / cargo-build-sbf 4.0.0) defaults to v1.53. Each silently uninstalls the other's
+rustup toolchain on invocation. That means which binary you get depends on which command
+you typed, and CLAUDE.md's own documented rebuild command for target/deploy-mainnet uses
+cargo build-sbf (v1.53) while target/deploy is normally produced by anchor build (v1.52),
+so those two artifacts have been compiled by different compilers. Until this is pinned,
+never compare a hash across the two commands and assume a source difference.
+
+MAKING IT WORSE, cargo's fingerprint does not track the platform-tools swap. Observed twice
+in one session: after switching toolchains, the SBF build reported "Finished release
+profile in ~1.4s" having recompiled nothing and simply re-copied the artifact built by the
+OTHER toolchain. `anchor test` did exactly this, so the .so it deployed to the local
+validator was not built by the toolchain anchor had just selected. A build that finishes in
+seconds after a toolchain change has not rebuilt anything. Note rust-toolchain.toml pins
+the HOST rust (1.96.0) only and has no effect on the SBF build, which uses platform-tools'
+own bundled rustc 1.89.0; it gives no reproducibility guarantee for the deployed artifact.
+
+[workspace.metadata.cli] solana = "4.0.1" in the root Cargo.toml exists solely for
+solana-verify. Do not remove it. solana-verify determines its docker image by reading that
+key, falling back to scanning Cargo.lock for the `solana-program` crate. Anchor 1.0 uses
+the split solana-* crates, so Cargo.lock contains no `solana-program` entry at all and the
+fallback cannot work; without this key solana-verify fails with "Failed to determine Solana
+version." Verified 2026-09-03 by reading solana-verify 0.5.1 source and by confirming
+`solana-program` and `solana-sdk` are both absent from Cargo.lock.
+
+ON-CHAIN security.txt: solana-security-txt 1.1.3, gated `#[cfg(not(feature =
+"no-entrypoint"))]` in lib.rs above declare_id!. Measured cost 2026-09-03: +496 bytes
+as committed (454,017 -> 454,513 trimmed, both built from the repo path under
+platform-tools v1.53), entirely .rodata, with .text byte-identical, so it adds no code and
+no compute. It fits inside
+the existing ProgramData allocation with roughly 17KB spare, so it needs no
+`solana program extend` and no additional rent.
+
+  BLOCKING: contacts and policy are UNRESOLVED PLACEHOLDERS pointing at the RFC 2606
+  .invalid TLD, chosen deliberately so a deploy fails review rather than shipping a
+  security contact nobody reads. THIS BINARY MUST NOT BE DEPLOYED until Milan supplies a
+  real monitored security contact and a policy URL. No SECURITY.md exists in this repo yet.
+  project_url and source_code are the literal string "private" because
+  github.com/MJ-Frictionless-NTWRK/plotarmor-program is a private repo (confirmed 404
+  unauthenticated 2026-09-03). source_revision, source_release and auditors are
+  deliberately omitted rather than filled with provisional values; source_revision in
+  particular would go stale silently on every deploy and become misleading evidence.
+
+VERIFIED BUILDS are not yet possible here and are not merely unrun. Blockers, all confirmed
+2026-09-03: docker is not installed on this machine; solana-verify is not installed; the
+source repo is private, which blocks both verify-from-repo and remote submission; and
+remote verification is mainnet-only, so devnet can never get a verification PDA or an
+explorer badge, only a local hash comparison. A verified deployment therefore requires a
+docker build AND a redeploy. Do not claim the deployed program is verifiable against HEAD;
+it is not, and the reason is compiler drift, not source drift.
 
 ## Model guidance (Claude Pro: Sonnet default, Opus and Haiku both available on this plan)
 - Default model for this project: Sonnet. It handles structs, most instructions, tests, and wiring.

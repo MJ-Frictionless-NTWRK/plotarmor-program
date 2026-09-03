@@ -31,6 +31,29 @@ use instructions::sign_contract::__client_accounts_sign_contract;
 pub use instructions::SignContract;
 pub use state::*;
 
+// on-chain security.txt (solana-security-txt 1.1.3). Embedded in .rodata only;
+// adds no code. Gated off for the no-entrypoint build so dependent crates that
+// pull this program in as a library do not inherit a second copy of the blob.
+//
+// WARNING: contacts and policy below are UNRESOLVED PLACEHOLDERS. They are
+// deliberately set to values that cannot resolve (RFC 2606 .invalid TLD) so that
+// any attempt to deploy this binary fails review rather than shipping a security
+// contact that nobody reads. Do NOT deploy until Milan supplies both values.
+// project_url and source_code are intentionally "private" while the source
+// repository is private. Per the approved scope, source_revision, source_release
+// and auditors are omitted rather than filled with provisional values.
+#[cfg(not(feature = "no-entrypoint"))]
+use solana_security_txt::security_txt;
+
+#[cfg(not(feature = "no-entrypoint"))]
+security_txt! {
+    name: "PlotArmor",
+    project_url: "private",
+    contacts: "email:UNSET-PLACEHOLDER-DO-NOT-DEPLOY@example.invalid",
+    policy: "UNSET-PLACEHOLDER-DO-NOT-DEPLOY",
+    source_code: "private"
+}
+
 declare_id!("3h9CzV9MJDeD5yjhVhdE6cupuXVRnLW1Cu6P14EJBKv2");
 
 #[program]
