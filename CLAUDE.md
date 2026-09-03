@@ -73,6 +73,52 @@ WorkMetadata PDA          = ["work_meta", work_claim_pda]
 WorkRelation PDA          = ["work_relation", parent_work_claim_pda, child_work_claim_pda]
 ```
 
+### AnchorRecord seed base is the anchored object, including for add_version
+Audit finding M1, 2026-09-03. Decision 2026-09-04: DOCUMENT, DO NOT CHANGE THE SEED.
+
+All four anchoring instructions satisfy seed_base == anchored_object, which is exactly
+what the canon line above specifies:
+  register_work_claim         ["anchor", work_claim, nonce]                  kind 0
+  add_version                 ["anchor", content_artifact, nonce]            kind 1
+  anchor_evidence_contract    ["anchor", evidence_anchor, nonce]             kind 2
+  anchor_authorized_contract  ["anchor", authorized_contract_anchor, nonce]  kind 3
+
+add_version is therefore NOT a deviation. It looks different only because
+ContentArtifact is content-addressed and shared across claimants, while work_claim,
+evidence_anchor and authorized_contract_anchor each already embed a principal in their
+own seeds. So add_version's AnchorRecord PDA is the only one carrying no principal.
+
+THE CONSEQUENCE, and it is real: two claimants who registered the same content bytes
+and then add the same version content with the same anchor_nonce derive the SAME
+AnchorRecord address. The second loses with account-already-in-use. A party who
+observes a pending add_version can take that PDA first and deliberately grief a
+specific creator, for the cost of rent plus a fee.
+
+RECOVERY: generate a FRESH anchor_nonce and resubmit. Reuse the link_nonce unchanged,
+because a failed transaction reverts atomically and creates no ClaimArtifactLink. This
+does not violate the "reuse nonces unchanged on retry" invariant further down: that
+invariant governs idempotent retries of the SAME intent, and a stolen PDA is a new
+intent. An accidental collision between honest users requires a 32-byte nonce match and
+is not a practical concern; only deliberate front-running reaches this.
+
+WHY NO SEED CHANGE. Adding work_claim to the seed would fix the collision, confirmed by
+derivation (Alice and Bob stop colliding). It was rejected because: (1) seeds are
+permanent per the heading above; (2) it would make add_version the ONLY instruction
+whose seed base is not its anchored object, breaking a uniform rule any indexer can
+rely on; (3) 32 AnchorRecords created by add_version already exist on devnet, read from
+chain 2026-09-04, and NONE is reachable under the new derivation for any nonce, since
+the seed base moves from content_artifact to work_claim; (4) a later add_version reusing
+an old (work_claim, content, nonce) triple would then succeed at the new address,
+creating a duplicate AnchorRecord for one logical event, which is a data-integrity
+regression in a rights-evidence ledger; (5) it needs a program redeploy and breaks live
+client code, including plotarmor-demo/src/vault/UploadFlow.tsx:556 plus 34 derivation
+sites in this repo. The trade was judged bad against a recoverable griefing vector.
+
+PINNED BY TEST: add_version_anchor_record_is_content_scoped_not_claimant_scoped in
+programs/plotarmor/tests/security_tests.rs asserts the collision AND the recovery, so
+this cannot be silently "fixed" by someone who has not read this entry. If that test
+starts failing, someone changed the seed. Read this section before deciding it is a bug.
+
 ## Account structs (fixed-size; 8-byte Anchor discriminator not shown)
 ```rust
 pub struct RegistryConfig {           // singleton, ~44 bytes

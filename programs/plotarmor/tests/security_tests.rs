@@ -1854,3 +1854,135 @@ fn non_upgrade_authority_cannot_init_registry_config() {
         "RegistryConfig must not have been created by a rejected init"
     );
 }
+
+// REGRESSION PIN, added 2026-09-04. DO NOT "FIX" THE BEHAVIOR THIS TEST ASSERTS.
+//
+// add_version's AnchorRecord is seeded ["anchor", content_artifact, anchor_nonce].
+// That is CORRECT per the PDA canon, which specifies
+// ["anchor", anchored_object_pda, anchor_nonce], and add_version's anchored object
+// IS the ContentArtifact (anchored_object_kind = ContentArtifact = 1). All four
+// anchoring instructions satisfy seed_base == anchored_object.
+//
+// Because ContentArtifact is content-addressed and therefore SHARED across every
+// claimant who registers the same bytes, the resulting AnchorRecord PDA carries no
+// principal. Two claimants adding the same version content with the same
+// anchor_nonce derive the SAME address, and the second one loses the race with
+// account-already-in-use. A party observing a pending add_version can exploit this
+// deliberately to grief a specific creator.
+//
+// This was raised as finding M1 in the 2026-09-03 audit and DELIBERATELY NOT FIXED
+// by a seed change, for reasons recorded in CLAUDE.md under the PDA canon:
+// seeds are permanent, the change would orphan live devnet AnchorRecords, it would
+// make add_version the only instruction whose seed base is not its anchored object,
+// and recovery is a one-line client action. Recovery is to generate a FRESH
+// anchor_nonce and resubmit; the link_nonce is reused unchanged, because a failed
+// transaction reverts atomically and creates no ClaimArtifactLink.
+//
+// This test pins all of that so a future reader who has not seen the history cannot
+// quietly "fix" the seed without a loud, explanatory failure here.
+#[test]
+fn add_version_anchor_record_is_content_scoped_not_claimant_scoped() {
+    let mut ctx = setup();
+    let registry_config = initialize_registry(&mut ctx.svm, &ctx.authority);
+
+    let alice = Keypair::new();
+    let bob = Keypair::new();
+    ctx.svm.airdrop(&alice.pubkey(), TEST_KEYPAIR_LAMPORTS).unwrap();
+    ctx.svm.airdrop(&bob.pubkey(), TEST_KEYPAIR_LAMPORTS).unwrap();
+
+    // Content-addressing convergence: one root ContentArtifact, two WorkClaims.
+    let root_hash = [200u8; 32];
+    let alice_claim = register_claim(
+        &mut ctx.svm, &alice, registry_config, root_hash, [201; 32], [202; 32],
+    );
+    let bob_claim = register_claim(
+        &mut ctx.svm, &bob, registry_config, root_hash, [203; 32], [204; 32],
+    );
+    assert_ne!(
+        alice_claim.work_claim, bob_claim.work_claim,
+        "two claimants over the same content must get distinct WorkClaims"
+    );
+
+    // Both now add the SAME new version content with the SAME anchor_nonce.
+    let version_hash = [210u8; 32];
+    let shared_nonce = [211u8; 32];
+    let version_content = Pubkey::find_program_address(
+        &[b"content", version_hash.as_ref()], &plotarmor::ID,
+    ).0;
+
+    // The seed shape under test. If someone adds a principal to the seed, the
+    // account asserted below will not exist and this test fails loudly.
+    let shared_anchor_record = Pubkey::find_program_address(
+        &[b"anchor", version_content.as_ref(), shared_nonce.as_ref()],
+        &plotarmor::ID,
+    ).0;
+
+    // Alice goes first and takes the PDA.
+    send_instruction(
+        &mut ctx.svm,
+        build_add_version(
+            &alice, registry_config, alice_claim.work_claim, version_hash, 1,
+            [212; 32], shared_nonce, alice_claim.claim_artifact_link,
+        ),
+        &alice,
+    );
+
+    let record: AnchorRecord = read_account(&ctx.svm, &shared_anchor_record);
+    assert_eq!(
+        record.anchored_object, version_content,
+        "canon: the AnchorRecord seed base must equal its anchored_object"
+    );
+    assert_eq!(record.anchored_object_kind, 1, "add_version anchors the ContentArtifact");
+
+    // Bob, on his own unrelated WorkClaim, collides on the identical PDA.
+    let error = send_instruction_result(
+        &mut ctx.svm,
+        build_add_version(
+            &bob, registry_config, bob_claim.work_claim, version_hash, 1,
+            [213; 32], shared_nonce, bob_claim.claim_artifact_link,
+        ),
+        &bob,
+    )
+    .unwrap_err();
+    let diagnostic = format!("{error:?}");
+    assert!(
+        diagnostic.contains("already in use") || diagnostic.contains("AccountAlreadyInUse"),
+        "expected the shared AnchorRecord PDA to already be taken, got {error:?}"
+    );
+
+    // RECOVERY, the documented mitigation: rotate only the anchor_nonce. The
+    // link_nonce is reused unchanged, since Bob's failed transaction reverted
+    // atomically and created no ClaimArtifactLink.
+    let fresh_nonce = [214u8; 32];
+    send_instruction(
+        &mut ctx.svm,
+        build_add_version(
+            &bob, registry_config, bob_claim.work_claim, version_hash, 1,
+            [213; 32], fresh_nonce, bob_claim.claim_artifact_link,
+        ),
+        &bob,
+    );
+
+    let bob_anchor_record = Pubkey::find_program_address(
+        &[b"anchor", version_content.as_ref(), fresh_nonce.as_ref()],
+        &plotarmor::ID,
+    ).0;
+    assert_ne!(
+        shared_anchor_record, bob_anchor_record,
+        "a fresh anchor_nonce must yield a different AnchorRecord address"
+    );
+    assert!(
+        ctx.svm.get_account(&bob_anchor_record).is_some(),
+        "recovery with a fresh nonce must succeed"
+    );
+
+    // Both records survive, and both heads advanced independently.
+    let alice_wc: WorkClaim = read_account(&ctx.svm, &alice_claim.work_claim);
+    let bob_wc: WorkClaim = read_account(&ctx.svm, &bob_claim.work_claim);
+    assert_eq!(alice_wc.latest_artifact, version_content);
+    assert_eq!(bob_wc.latest_artifact, version_content);
+    assert_ne!(
+        alice_wc.latest_link, bob_wc.latest_link,
+        "each claimant keeps an independent lineage head"
+    );
+}
