@@ -314,6 +314,42 @@ Tests: two-layer suite.
     session): `anchor test`, 34/34 passing on first run.
   Combined: `yarn test` runs cargo test then anchor test sequentially.
 
+## Devnet deploy history (established from chain 2026-09-03)
+
+Read from ProgramData Dr8S95D7bHGBrd6gFSAommQjBNH1qcBMJpofe9ooLRpL, which has exactly 9
+transactions, so this is the COMPLETE history. Every one is signed by
+EjeeFw3Ft856o9Ek2VWti6aAco9RXxGUyeLk96dPSWzd, a single key. Program byte counts are derived
+from each upgrade buffer's rent-exempt balance (buffer_len = 37 + program_len,
+rent = (128 + data_len) * 6960); that constant was verified exactly against the live
+ProgramData account before use ((128 + 472005) * 6960 = 3,286,045,680, its actual balance).
+
+  slot 468720131  2026-06-11 15:30:02Z  createAccount + deployWithMaxDataLen   372,136 bytes
+  slot 471473143  2026-06-23 18:56:47Z  createAccount + initializeBuffer + extendProgram
+  slot 471473176  2026-06-23 18:56:59Z  upgrade                                451,488 bytes
+  slot 473711141  2026-07-03 14:35:36Z  extendProgram
+  slot 473711199  2026-07-03 14:35:58Z  upgrade  (Finding 1)                   451,944 bytes
+  slot 476271233  2026-07-14 19:42:52Z  extendProgram
+  slot 476271283  2026-07-14 19:43:11Z  upgrade  UNDOCUMENTED until now        469,472 bytes
+  slot 476272042  2026-07-14 19:47:48Z  upgrade  UNDOCUMENTED until now        470,280 bytes
+  slot 476301346  2026-07-14 22:46:50Z  upgrade  (current head)                470,280 bytes
+
+THE TWO 14 JULY UPGRADES AT 19:43 AND 19:47 WERE NOT RECORDED ANYWHERE in this repo before
+2026-09-03. Only the 2026-07-03 Finding 1 deploy had been logged. The +17,528 byte jump at
+19:43 is sign_contract being added. The last two upgrades pushed IDENTICAL program lengths
+(470,280 bytes); byte-identity between them cannot be proven from chain, because upgrade
+buffers are closed and drained on execution and historical account data is not retrievable
+from a standard RPC. The 22:46 transaction carries two ComputeBudget instructions and a
+slightly higher fee (5,014 vs 5,000 lamports), which is the shape of a re-send with a
+priority fee. That is consistent with a re-push of identical bytes but is NOT proof, and
+must not be written up as if it were.
+
+DEPLOY PRECEDED COMMIT. The last deploy is 2026-07-14 22:46 UTC. Commit 09c5bfc ("feat: add
+Option 2 sign_contract") is dated 2026-07-15 12:39 UTC, about 14 hours LATER. The program
+was deployed from uncommitted working-tree code and committed the next day. This ordering
+is invisible in git history and would mislead an auditor reading it alone. It resolves
+cleanly: see the reproduction proof in the next section, which confirms the deployed bytes
+are exactly commit 09c5bfc. The habit is the risk, not this particular deploy.
+
 ## Build and deploy configuration (added 2026-09-03)
 
 Current HEAD: 98a7ebb ("docs: close sign_contract 4-pass verification with live devnet
@@ -342,14 +378,61 @@ EXACTLY (sha256 of both, trailing zeros trimmed:
 deployed binary is commit 09c5bfc, the build is fully reproducible once the tools version
 is pinned, and platform-tools v1.52 is still installable via `--tools-version v1.52`.
 
-THE TWO BUILD COMMANDS IN THIS REPO DISAGREE. On this machine, `anchor build` / `anchor
-test` (anchor-cli 1.0.1) selects platform-tools v1.52, while `cargo build-sbf` (Solana CLI
-4.0.1 / cargo-build-sbf 4.0.0) defaults to v1.53. Each silently uninstalls the other's
-rustup toolchain on invocation. That means which binary you get depends on which command
-you typed, and CLAUDE.md's own documented rebuild command for target/deploy-mainnet uses
-cargo build-sbf (v1.53) while target/deploy is normally produced by anchor build (v1.52),
-so those two artifacts have been compiled by different compilers. Until this is pinned,
-never compare a hash across the two commands and assume a source difference.
+THE TOOLCHAIN IS NOW PINNED TO platform-tools v1.52. RESOLVED 2026-09-03; the
+divergence described below is fixed, and this paragraph is kept because the mechanism is
+not obvious and will re-break if anchor-cli is upgraded without re-checking.
+
+  The pin lives in TWO places and both must agree:
+    Anchor.toml   anchor_version = "1.0.1"     pins the anchor path
+    scripts/build.sh  PLATFORM_TOOLS_VERSION="v1.52"   pins the cargo path
+  Build with `scripts/build.sh` (devnet), `scripts/build.sh --mainnet`, or
+  `scripts/build.sh --anchor`. `scripts/build.sh --check` prints both pins.
+  Do NOT call `cargo build-sbf` directly; it defaults to v1.53 and will drift.
+
+  THE WRAPPER ALSO GUARDS AGAINST THE STALE-ARTIFACT TRAP described further down.
+  It records the pin in target/.platform-tools-pin and, when that stamp does not match
+  PLATFORM_TOOLS_VERSION, deletes target/sbpf-solana-solana so the next build is genuinely
+  cold. This is necessary because cargo's fingerprint does not track the platform-tools
+  version: without the guard, a build after a toolchain change reports "Finished in ~1.3s",
+  recompiles nothing, and leaves an artifact built by the OTHER compiler sitting in
+  target/deploy. That exact failure was reproduced in this repo on 2026-09-03 while testing
+  the pin, which is why the guard exists rather than a comment telling people to be
+  careful.
+
+  WHY v1.52 AND NOT v1.53. anchor-cli 1.0.1 passes its OWN --tools-version to
+  cargo-build-sbf and pins v1.52. It cannot be overridden: `anchor build -- --tools-version
+  v1.53` fails with "the argument '--tools-version <STRING>' was provided more than once".
+  Verified 2026-09-03 by watching a bare `anchor build` switch the registered rustup
+  toolchain from v1.53 to v1.52 within 8 seconds. So v1.52 is the only value both paths can
+  agree on today, and it is also the version that produced the deployed devnet binary,
+  which therefore stays reproducible. Note Anchor.toml's solana_version key does NOT pin
+  platform-tools: anchor documents -s/--solana-version and -d/--docker-image as applying to
+  `--verifiable` docker builds only. Pinning anchor_version is what pins the anchor path.
+
+  IF ANCHOR-CLI IS EVER UPGRADED, the tools version it selects will likely change and the
+  two paths will silently diverge again. Re-run the cold-build proof below and update
+  PLATFORM_TOOLS_VERSION to whatever the new anchor selects. Do not assume.
+
+  COLD-BUILD PROOF, run 2026-09-03 at commit 0debdaa. Two fresh checkouts of the same tree,
+  two fresh target dirs, one build per path:
+    cargo path  scripts/build.sh                (passes --tools-version v1.52)
+    anchor path anchor build --no-idl --ignore-keys (native v1.52, no override)
+  Both took 17m 12s, so both genuinely recompiled, and both produced:
+    sha256 31acf681b6b20206895ef3054d94b7419d97d67c2c1614cb51b5b53b12f1fed8, 470,553 bytes
+  IDENTICAL. The two paths now agree. To re-run this proof, extract the tree twice with
+  `git archive HEAD | tar -x -C <dir>`, build one copy each way, and compare the sha256 of
+  each target/deploy/plotarmor.so with trailing zero bytes stripped. Use --ignore-keys on
+  the anchor copy: a fresh extract has no target/deploy/plotarmor-keypair.json (target is
+  gitignored), so anchor generates a random one and aborts on a program-ID mismatch. The
+  keypair file does not affect the compiled bytes, since declare_id! is in source.
+
+THE ORIGINAL DIVERGENCE, for context. `anchor build` / `anchor test` selected v1.52 while
+`cargo build-sbf` defaulted to v1.53, and each silently uninstalled the other's rustup
+toolchain on invocation. Which binary you got depended on which command you typed, and
+this file's own former rebuild command for target/deploy-mainnet used cargo build-sbf
+(v1.53) while target/deploy came from anchor build (v1.52), so those two artifacts were
+compiled by different compilers. Never compare a hash across unpinned commands and assume
+a source difference.
 
 MAKING IT WORSE, cargo's fingerprint does not track the platform-tools swap. Observed twice
 in one session: after switching toolchains, the SBF build reported "Finished release
@@ -369,9 +452,12 @@ version." Verified 2026-09-03 by reading solana-verify 0.5.1 source and by confi
 `solana-program` and `solana-sdk` are both absent from Cargo.lock.
 
 ON-CHAIN security.txt: solana-security-txt 1.1.3, gated `#[cfg(not(feature =
-"no-entrypoint"))]` in lib.rs above declare_id!. Measured cost 2026-09-03: +496 bytes
-as committed (454,017 -> 454,513 trimmed, both built from the repo path under
-platform-tools v1.53), entirely .rodata, with .text byte-identical, so it adds no code and
+"no-entrypoint"))]` in lib.rs above declare_id!. Measured cost 2026-09-03: +296 bytes under the
+PINNED toolchain v1.52 (deployed 09c5bfc at 470,257 trimmed vs 0debdaa at 470,553; program
+source is otherwise unchanged between those commits, so the delta is security.txt alone).
+The same measurement under the unpinned v1.53 gave +496 bytes (454,017 -> 454,513); the
+figure differs by compiler padding, so always state which toolchain a size came from. In
+both cases the growth is entirely .rodata with .text byte-identical, so it adds no code and
 no compute. It fits inside
 the existing ProgramData allocation with roughly 17KB spare, so it needs no
 `solana program extend` and no additional rent.
