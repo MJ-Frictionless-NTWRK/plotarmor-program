@@ -1,11 +1,22 @@
 use anchor_lang::prelude::*;
 
 use crate::error::PlotArmorError;
-use crate::state::{ContractArtifact, ContractSignature};
+use crate::state::{ContractArtifact, ContractSignature, RegistryConfig};
 
 #[derive(Accounts)]
 #[instruction(content_hash: [u8; 32])]
 pub struct SignContract<'info> {
+    // Added 2026-09-04 (audit M2). sign_contract was previously the ONLY instruction
+    // taking no RegistryConfig, so it could not honour the paused flag and sat outside
+    // the kill-switch surface the other five respect. Same shape as the other five:
+    // Account (not mut), const seed, paused checked in the handler. This does NOT add a
+    // pause setter; the kill switch itself stays deferred (Known v1 limitations, item C).
+    #[account(
+        seeds = [b"config"],
+        bump,
+    )]
+    pub registry_config: Account<'info, RegistryConfig>,
+
     // The contract being signed. Must already exist on-chain; ContractArtifact
     // is never init'd here (sign_contract does not stand alone -- see spec §Design decisions #3).
     // Seeds re-derived from the account's OWN stored raw_hash (not the client's
@@ -61,6 +72,10 @@ pub fn handler(
     ctx: Context<SignContract>,
     content_hash: [u8; 32],
 ) -> Result<()> {
+    // 1. Reject if paused. First check, matching the other five instructions.
+    require!(!ctx.accounts.registry_config.paused, PlotArmorError::Paused);
+
+    // 2. The client's asserted content hash must match the on-chain artifact.
     require!(
         content_hash == ctx.accounts.contract_artifact.raw_hash,
         PlotArmorError::ContentHashMismatch

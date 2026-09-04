@@ -236,6 +236,15 @@ programs/plotarmor/src/lib.rs. Scope remains frozen: no eighth instruction.
 - anchor_authorized_contract(raw_contract_hash, contract_kind, anchor_nonce, anchor_mode_arg, external_ref_hash) -> ContractArtifact + AuthorizedContractAnchor + AnchorRecord
   (requires threshold-meeting signatures from the WorkClaim's Ownership)
 - sign_contract(content_hash) -> ContractSignature (added 2026-07-15, sign_contract-spec.md, Option 2 locked by Milan)
+  ACCOUNT LIST CHANGED 2026-09-04 (audit M2): now takes registry_config as its FIRST
+  account and rejects with Paused (6008) when registry_config.paused is true, matching
+  the other five instructions. Before this it was the only instruction with no
+  RegistryConfig, so a paused program would have kept accepting signatures. Side effect
+  worth knowing: sign_contract now requires RegistryConfig to EXIST. That is not
+  reachable in practice, because sign_contract requires a pre-existing ContractArtifact
+  and only anchor_evidence_contract / anchor_authorized_contract can create one, and both
+  of those already require RegistryConfig. This is a BREAKING client change; see the
+  Devnet script inventory redeploy note and the demo-repo handoff below.
   ContractArtifact must already exist on-chain (never init'd here; sign_contract does not stand alone).
   Re-derives contract_artifact's seed from the account's OWN stored raw_hash, then separately requires
   content_hash == contract_artifact.raw_hash in the handler (ContentHashMismatch, 6011) -- kept as two
@@ -578,7 +587,15 @@ B. init_registry_config upgrade-authority constraint — FIXED. The instruction 
    legitimate ProgramData for this program, and (2) the signer is the upgrade authority
    recorded in program_data. Error: Unauthorized(6009). Fixed in commit after 800fa99.
 
-C. No pause or config-update instruction exists. The paused field and enabled_anchor_modes
+C. No pause or config-update instruction exists. STILL TRUE after the 2026-09-04 M2
+   change: bringing sign_contract under the paused flag did NOT add a setter. All six
+   instructions now honour registry_config.paused, and nothing can set it to true. The
+   kill switch remains deliberately deferred; only its coverage was made uniform. The
+   flag is reachable in tests only, by serializing paused = true directly into the
+   account under LiteSVM (happy_paths.rs::paused_registry_rejects_writes and
+   sign_contract_tests.rs::paused_registry_rejects_sign_contract).
+   Original entry follows.
+   No pause or config-update instruction exists. The paused field and enabled_anchor_modes
    bitfield in RegistryConfig have no setter. The kill switch is intentionally deferred to
    a later phase. This is fail-safe (everything keeps working) not exploitable.
 
@@ -997,6 +1014,16 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
 6. Canonicalization spec v1 with test vectors (needed before case study onboarding; documentation task).
 
 ## Permanent verification toolchain (run before every commit)
+
+COVERAGE GAP, recorded 2026-09-04, NOT fixed. verify_calls.py checks ARGUMENT COUNTS
+only. check_integrity.py additionally checks that `.accountsStrict(`/`.accounts(` is
+present and that a `.rpc()`/`.instruction()` terminator follows. NEITHER inspects the
+CONTENTS of the accounts block. So a call site missing a newly-required account passes
+both checkers cleanly. This was demonstrated by the M2 change: adding registry_config to
+sign_contract broke 10 in-repo call sites and both checkers still reported PASS on the
+un-updated code, because the argument count (signContract=1) never changed. Do not treat
+a green run of these two as evidence that account lists are correct. Only a real build
+plus `anchor test`, or a live devnet run, catches that class of breakage.
 - `python3 scripts/verify_calls.py scripts/measure_devnet.ts tests/plotarmor.ts scripts/devnet_register_test.ts scripts/devnet_ext_ref_hash_test.ts scripts/devnet_sign_contract_test.ts scripts/devnet_sign_contract_adversarial_test.ts`
   Checks argument counts for all 5 instruction call sites across all 6 TS files that call
   program instructions. Expected: registerWorkClaim=9, addVersion=7, anchorEvidenceContract=6,
@@ -1017,6 +1044,17 @@ Database: Supabase (Postgres). All Rights Index queries go through a repository 
   `grep -rn "\.registerWorkClaim\|\.addVersion\|\.anchorEvidenceContract\|\.anchorAuthorizedContract\|\.signContract" . | grep -v node_modules | grep -v target`
 
 ## Devnet script inventory (scripts/)
+
+REDEPLOY PENDING, 2026-09-04. sign_contract gained a required RegistryConfig account
+(audit M2). The DEPLOYED devnet program does NOT accept that account yet, so the two
+sign_contract devnet scripts below have been updated to the new account list and WILL
+FAIL against the currently deployed binary until the program is redeployed:
+  scripts/devnet_sign_contract_test.ts
+  scripts/devnet_sign_contract_adversarial_test.ts
+This is expected and was accepted when the change was approved. Do not "fix" those
+scripts by removing registryConfig; they are correct for the current source and wrong
+only for the stale deployment. measure_devnet.ts, devnet_register_test.ts and
+devnet_ext_ref_hash_test.ts do not call sign_contract and are unaffected.
 - `measure_devnet.ts` — 24 scenarios (1-7, 9-24; scenario 8 merged into 6). Primary devnet
   proof suite. Exits non-zero on any failure. Run with:
   `HELIUS_API_KEY=<key> node_modules/.bin/ts-node --transpile-only scripts/measure_devnet.ts`

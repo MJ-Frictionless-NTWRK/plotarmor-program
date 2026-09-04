@@ -560,6 +560,7 @@ describe("PlotArmor", () => {
       await program.methods
         .signContract(ba(rawContractHash))
         .accountsStrict({
+          registryConfig,
           contractArtifact,
           contractSignature,
           signer: payer.publicKey,
@@ -1101,6 +1102,7 @@ describe("PlotArmor", () => {
         await program.methods
           .signContract(ba(wrongHash))
           .accountsStrict({
+            registryConfig,
             contractArtifact,
             contractSignature,
             signer: payer.publicKey,
@@ -1123,6 +1125,7 @@ describe("PlotArmor", () => {
       await program.methods
         .signContract(ba(rawContractHash))
         .accountsStrict({
+          registryConfig,
           contractArtifact,
           contractSignature,
           signer: payer.publicKey,
@@ -1134,6 +1137,7 @@ describe("PlotArmor", () => {
         await program.methods
           .signContract(ba(rawContractHash))
           .accountsStrict({
+            registryConfig,
             contractArtifact,
             contractSignature,
             signer: payer.publicKey,
@@ -1158,6 +1162,7 @@ describe("PlotArmor", () => {
         await program.methods
           .signContract(ba(phantomHash))
           .accountsStrict({
+            registryConfig,
             contractArtifact: phantomContractArtifact,
             contractSignature,
             signer: payer.publicKey,

@@ -154,6 +154,7 @@ async function main() {
   const signSig = await program.methods
     .signContract(ba(rawContractHash))
     .accountsStrict({
+      registryConfig,
       contractArtifact,
       contractSignature,
       signer: payer.publicKey,

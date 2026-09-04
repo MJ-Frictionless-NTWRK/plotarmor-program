@@ -99,11 +99,16 @@ fn sign_contract_instruction(
         &plotarmor::ID,
     )
     .0;
+    // Derived here rather than threaded through every caller: it is a const-seeded
+    // singleton PDA, exactly like contract_signature above. Required since 2026-09-04
+    // (audit M2), when sign_contract gained the RegistryConfig account.
+    let registry_config = Pubkey::find_program_address(&[b"config"], &plotarmor::ID).0;
 
     let instruction = Instruction::new_with_bytes(
         plotarmor::ID,
         &plotarmor::instruction::SignContract { content_hash }.data(),
         plotarmor::accounts::SignContract {
+            registry_config,
             contract_artifact,
             contract_signature,
             signer: signer.pubkey(),
@@ -372,4 +377,64 @@ fn registry_wiring_sanity_check() {
     let registry_config = initialize_registry(&mut context.svm, &context.authority);
     let config: RegistryConfig = read_account(&context.svm, &registry_config);
     assert_eq!(config.authority, context.authority.pubkey());
+}
+
+// Audit M2, closed 2026-09-04. Until then sign_contract was the ONLY instruction
+// taking no RegistryConfig, so it could not honour the paused flag and a paused
+// program would have kept accepting signatures. It now carries the account and the
+// check, matching the other five.
+//
+// paused has no setter by design (Known v1 limitations, item C: the kill switch is
+// deliberately deferred, and this change does NOT add one). So the flag is reached the
+// same way happy_paths.rs::paused_registry_rejects_writes reaches it: serialize
+// paused = true straight into the account under LiteSVM. That is the established
+// technique in this repo for exercising an otherwise-unreachable guard.
+#[test]
+fn paused_registry_rejects_sign_contract() {
+    use anchor_lang::AccountSerialize;
+
+    let mut context = setup();
+    let registry_config = initialize_registry(&mut context.svm, &context.authority);
+
+    let raw_contract_hash = [61u8; 32];
+    let contract_artifact = create_contract_artifact(
+        &mut context.svm,
+        registry_config,
+        &context.authority,
+        raw_contract_hash,
+        [62; 32],
+    );
+
+    // Flip paused on the live account, exactly as happy_paths.rs does.
+    let mut config: RegistryConfig = read_account(&context.svm, &registry_config);
+    config.paused = true;
+    let mut config_account = context.svm.get_account(&registry_config).unwrap();
+    config
+        .try_serialize(&mut config_account.data.as_mut_slice())
+        .unwrap();
+    context
+        .svm
+        .set_account(registry_config, config_account)
+        .unwrap();
+
+    // A signature that would otherwise succeed must now be rejected. Note the
+    // content_hash is CORRECT here, so Paused is the only thing that can reject it;
+    // this cannot pass for the wrong reason.
+    let (instruction, contract_signature) =
+        sign_contract_instruction(contract_artifact, &context.authority, raw_contract_hash);
+
+    let error = send_instruction_result(&mut context.svm, instruction, &context.authority)
+        .expect_err("sign_contract must be rejected while the registry is paused");
+    assert_anchor_error(&error, "Paused", 6008);
+
+    // A rejected signature must leave no ContractSignature behind.
+    assert!(
+        context.svm.get_account(&contract_signature).is_none()
+            || context
+                .svm
+                .get_account(&contract_signature)
+                .map(|a| a.owner != plotarmor::ID)
+                .unwrap_or(true),
+        "no ContractSignature may be created while paused"
+    );
 }

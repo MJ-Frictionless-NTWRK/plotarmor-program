@@ -126,6 +126,7 @@ async function main() {
       await program.methods
         .signContract(wrongHash)
         .accountsStrict({
+          registryConfig,
           contractArtifact,
           contractSignature,
           signer: payer.publicKey,
@@ -153,6 +154,7 @@ async function main() {
     const firstSig = await program.methods
       .signContract(rawContractHash)
       .accountsStrict({
+        registryConfig,
         contractArtifact,
         contractSignature,
         signer: payer.publicKey,
@@ -165,6 +167,7 @@ async function main() {
       await program.methods
         .signContract(rawContractHash)
         .accountsStrict({
+          registryConfig,
           contractArtifact,
           contractSignature,
           signer: payer.publicKey,
@@ -194,6 +197,7 @@ async function main() {
       await program.methods
         .signContract(phantomHash)
         .accountsStrict({
+          registryConfig,
           contractArtifact: phantomContractArtifact,
           contractSignature,
           signer: payer.publicKey,
