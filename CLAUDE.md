@@ -182,7 +182,9 @@ pub struct ContractArtifact {         // ~50 bytes
 pub struct EvidenceAnchor {           // ~112 bytes; unilateral
     pub anchorer: Pubkey,
     pub contract_artifact: Pubkey,
-    pub asserted_work_claim: Pubkey,  // zero pubkey allowed; NOT validated by program
+    pub asserted_work_claim: Pubkey,  // UNVERIFIED ASSERTION BY THE ANCHORER, not a program-checked
+                                      // relationship. Zero allowed; any value accepted, including a
+                                      // pubkey with no account behind it. See Known v1 limitations, item I.
     pub timestamp: i64,
 }
 pub struct AuthorizedContractAnchor { // ~80 bytes; threshold-approved
@@ -686,6 +688,52 @@ H. THRESHOLD IS A LEDGER OF STATED INTENT, NOT AN ENFORCED CONTROL. Audit findin
    This is a documentation fix, not a code fix. Real enforcement requires the custody-model
    decision (Decision 5, pending Sali Law Group) before implementation. Flag any work that
    would start enforcing thresholds with COME TO CLAUDE CHAT.
+
+I. asserted_work_claim IS AN UNVERIFIED ASSERTION, NOT A PROGRAM-CHECKED RELATIONSHIP.
+   Audit finding M4, 2026-09-03; documented 2026-09-04, no code change. Accepted v1 design,
+   not a bug: the anchor is correctly named "unilateral," and anchor_evidence_contract
+   exists precisely so one party can anchor evidence without anyone else's cooperation.
+   Third in the same family as item G (a signature proves which wallet signed, not who) and
+   item H (a threshold records stated intent, not an enforced control). Same failure mode,
+   same caution: do not present a recorded assertion as a verified fact.
+
+   RE-VERIFIED FROM SOURCE 2026-09-04, not carried over from the audit. asserted_work_claim
+   occurs in exactly seven places across programs/plotarmor/src: the struct field
+   (state.rs), the lib.rs handler signature and its pass-through, the #[instruction(...)]
+   declaration, the handler parameter, one comment, and a single verbatim write
+   (anchor_evidence_contract.rs, evidence_anchor.asserted_work_claim = asserted_work_claim).
+   There is no constraint, no has_one, and no require! touching it anywhere. It is not used
+   in any PDA seed; the EvidenceAnchor seeds are ["evidence", anchorer, contract_artifact].
+
+   STRONGER THAN "UNVALIDATED": the referenced WorkClaim is never even loaded. The
+   AnchorEvidenceContract accounts struct contains only registry_config, contract_artifact,
+   evidence_anchor, anchor_record, anchorer and system_program. No WorkClaim account is in
+   scope at all, so the program is structurally incapable of checking the assertion without
+   an account-list change, which would be a breaking client change. The handler's only
+   checks are assert_mode_allowed, the paused gate, and ContractKind::from_u8.
+
+   PROVEN BY AN EXISTING PASSING TEST: happy_paths.rs passes Pubkey::new_unique() as
+   asserted_work_claim, a key with no account behind it whatsoever, and asserts it round
+   trips unchanged. So the program demonstrably accepts a reference to something that does
+   not exist. A real WorkClaim belonging to a third party is trivially accepted too; that
+   specific case is untested only because the nonexistent-key case already proves no
+   existence check runs.
+
+   CONSEQUENCE: anyone can anchor any contract hash asserting association with any
+   WorkClaim, including a well-known creator's, for the cost of rent plus a transaction fee.
+   The resulting EvidenceAnchor is a truthful record that THIS anchorer asserted THIS link
+   at THIS time. It is not evidence that the link is real, and it is not evidence the
+   referenced claimant agreed to anything.
+
+   DO NOT RENDER asserted_work_claim AS A VERIFIED RELATIONSHIP in UI, the Rights Index, or
+   anything court-facing. Do not turn it into a link or a join that implies the referenced
+   work endorses or is party to the contract, and do not aggregate it into counts of
+   contracts "associated with" a work without labelling the association as claimed by the
+   anchorer. The program-checked counterpart is AuthorizedContractAnchor, created by
+   anchor_authorized_contract, which does tie a contract to a WorkClaim through
+   Ownership.admin. Read note: if you need a verified link, read AuthorizedContractAnchor;
+   asserted_work_claim is the unverified one. Present the anchorer alongside the assertion
+   so a reader can see whose claim it is.
 
 Implementation detail (not a limitation): register_work_claim sets initial OwnerRecord.role = 0 (Unspecified). If Author attribution is required, it must be set via a subsequent add_owner call.
 
