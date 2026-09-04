@@ -152,9 +152,9 @@ pub struct ClaimArtifactLink {        // ~112 bytes
 }
 pub struct Ownership {                // ~110 bytes
     pub work_claim: Pubkey,
-    pub total_shares: u16,
-    pub threshold_shares: u16,
-    pub admin: Pubkey,
+    pub total_shares: u16,            // RECORDED, NOT ENFORCED. See Known v1 limitations, item H.
+    pub threshold_shares: u16,        // RECORDED, NOT ENFORCED. No instruction reads this to authorize anything. See item H.
+    pub admin: Pubkey,                // the ONLY authority the program actually checks on this account
     pub rules_version: u8,
     pub privacy_mode: u8,             // 0 = transparent (only value used in v1)
     pub commitment_root: [u8; 32],    // zero in v1
@@ -644,6 +644,48 @@ G. ContractSignature.content_hash naming, confirmed correct 2026-07-15: verified
    other init-only account in the program (WorkClaim, Ownership, OwnerRecord,
    ClaimArtifactLink, EvidenceAnchor, AuthorizedContractAnchor, AnchorRecord) also has no
    is_initialized field; only the two init_if_needed accounts do.
+
+H. THRESHOLD IS A LEDGER OF STATED INTENT, NOT AN ENFORCED CONTROL. Audit finding M3,
+   2026-09-03; documented 2026-09-04, no code change. This is the exact parallel of the
+   ContractSignature caution above (state.rs signer field, and item G): that one says a
+   signature proves "this wallet signed this hash," not "the creator signed." This one says
+   Ownership.threshold_shares and OwnerRecord.share accurately record what the parties
+   STATED, and nothing more.
+
+   Ownership.threshold_shares, Ownership.total_shares and OwnerRecord.share are written and
+   range-checked on the way in, and then never read by any authorization decision anywhere
+   in the program. Re-verified 2026-09-04 by grepping every occurrence in
+   programs/plotarmor/src: every single one is a struct declaration, a handler parameter, a
+   range check on the value being written, or a write. Not one is a read feeding a decision.
+
+   What actually authorizes each instruction today:
+     add_version                 has_one = claimant           ONE signer, the claimant
+     anchor_authorized_contract  admin.key() == ownership.admin  ONE signer, the admin
+     add_owner                   has_one = admin              ONE signer, the admin
+   anchor_authorized_contract is named "authorized" and the white paper specifies
+   "threshold-meeting signatures from the WorkClaim's Ownership," but the deployed check is
+   a single admin key. See also limitations A and E, which are the same gap seen from the
+   instruction side; item H is that gap stated once from the data side.
+
+   CONSEQUENCES, none of them hypothetical:
+   - A single admin can act regardless of the recorded threshold. threshold_shares = 3 of 5
+     does not stop the admin acting alone, because no code path consults it.
+   - add_owner lets the admin set new_threshold_shares to any value in (0, new_total],
+     including 1 (add_owner.rs, the new_threshold_shares > 0 && <= new_total check). See
+     limitation D.
+   - ThresholdNotMet (6007) is defined in error.rs and is raised by nothing. Confirmed by
+     grep: the only occurrences are the enum variant and a comment.
+
+   DO NOT DESCRIBE threshold_shares AS AN ON-CHAIN CONTROL, in UI, in partner or case-study
+   material, in the Rights Index, or in anything court-facing. It is a truthful record of
+   what the parties said they agreed, timestamped and immutable, which has real evidentiary
+   value on its own terms. It is not a mechanism that prevented anybody from doing anything.
+   Saying otherwise would overstate what the chain proves, which is the same failure mode
+   the ContractSignature caution exists to prevent.
+
+   This is a documentation fix, not a code fix. Real enforcement requires the custody-model
+   decision (Decision 5, pending Sali Law Group) before implementation. Flag any work that
+   would start enforcing thresholds with COME TO CLAUDE CHAT.
 
 Implementation detail (not a limitation): register_work_claim sets initial OwnerRecord.role = 0 (Unspecified). If Author attribution is required, it must be set via a subsequent add_owner call.
 
